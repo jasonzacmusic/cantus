@@ -361,7 +361,7 @@ function Piano({
 //  SCALE RIBBON — a reference chart: key ▸ notes ▸ scale degrees
 // ════════════════════════════════════════════════════════════
 
-function ScaleRibbon({ rootIdx, scaleId, colors, fontMono, fontDisplay, useFlats }) {
+function ScaleRibbon({ rootIdx, scaleId, colors, fontMono, fontDisplay, useFlats, darkMode }) {
   const s = SCALES[scaleId];
   const notes = s.steps.map((semi, i) => {
     const pc = mod12(rootIdx + semi);
@@ -389,7 +389,11 @@ function ScaleRibbon({ rootIdx, scaleId, colors, fontMono, fontDisplay, useFlats
       {notes.map((n, i) => {
         const x = 2 + i * (keyW + gap);
         const isRoot = i === 0;
-        const fillColor = isRoot ? s.color : (n.isBlack ? '#1F1E2E' : '#FBFAF5');
+        // Dark-mode keys: lighter whites + mid-tone blacks with a light border so
+        // both key types stand off the deep indigo page.
+        const whiteKey = darkMode ? '#E6E0D0' : '#FBFAF5';
+        const blackKey = darkMode ? '#3A3550' : '#1F1E2E';
+        const fillColor = isRoot ? s.color : (n.isBlack ? blackKey : whiteKey);
         const h = n.isBlack ? blackH : whiteH;
         const rectX = n.isBlack ? x + 4 : x;
         const rectW = n.isBlack ? keyW - 8 : keyW;
@@ -401,7 +405,7 @@ function ScaleRibbon({ rootIdx, scaleId, colors, fontMono, fontDisplay, useFlats
           <g key={i}>
             <rect x={rectX} y={topPad} width={rectW} height={h} rx={4}
               fill={fillColor}
-              stroke={isRoot ? s.color : (n.isBlack ? '#12121C' : '#2A2A3A')}
+              stroke={isRoot ? s.color : (darkMode ? (n.isBlack ? '#5A5272' : '#8A8298') : (n.isBlack ? '#12121C' : '#2A2A3A'))}
               strokeWidth={n.isBlack ? 1.2 : 1.4}
               style={{ animation: `scaleInDot 500ms ${i * 60}ms both ease-out` }}/>
             {/* Note letter printed on the key itself */}
@@ -1507,7 +1511,7 @@ export default function Cantus() {
         <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '28px', flexWrap: 'wrap', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <img
-              src="/nsm-logo.png"
+              src={darkMode ? '/nsm-logo-white.png' : '/nsm-logo.png'}
               alt="Nathaniel School of Music"
               style={{ height: 72, width: 'auto', display: 'block' }}
               decoding="async"
@@ -1548,6 +1552,7 @@ export default function Cantus() {
               aria-label="Toggle dark mode">
               {darkMode ? <Sun size={12}/> : <Moon size={12}/>}
             </button>
+            <HeaderTipButton colors={colors} fontMono={fontMono} fontDisplay={fontDisplay} showToast={showToast}/>
           </div>
         </header>
 
@@ -2039,7 +2044,7 @@ export default function Cantus() {
                   destPinned={destinationIsPinned(m, false)}
                   pinDisabled={pinboard.length >= 4}
                   colors={colors} fontDisplay={fontDisplay} fontMono={fontMono}
-                  isMinor={!isMajorFamily(scaleId)}/>
+                  isMinor={!isMajorFamily(scaleId)} darkMode={darkMode}/>
               ))}
             </div>
             <div style={{ fontFamily: fontMono, fontSize: '10px', letterSpacing: '0.15em', color: colors.muted, marginBottom: 8, paddingLeft: 2 }}>
@@ -2054,7 +2059,7 @@ export default function Cantus() {
                   destPinned={destinationIsPinned(m, false)}
                   pinDisabled={pinboard.length >= 4}
                   colors={colors} fontDisplay={fontDisplay} fontMono={fontMono}
-                  isMinor={!isMajorFamily(scaleId)}/>
+                  isMinor={!isMajorFamily(scaleId)} darkMode={darkMode}/>
               ))}
             </div>
           </div>
@@ -2071,7 +2076,7 @@ export default function Cantus() {
                   destPinned={destinationIsPinned(m, false)}
                   pinDisabled={pinboard.length >= 4}
                   colors={colors} fontDisplay={fontDisplay} fontMono={fontMono}
-                  isMinor={!isMajorFamily(scaleId)}/>
+                  isMinor={!isMajorFamily(scaleId)} darkMode={darkMode}/>
               ))}
             </div>
             <div style={{ fontFamily: fontMono, fontSize: '10px', letterSpacing: '0.15em', color: colors.muted, marginBottom: 8, paddingLeft: 2 }}>
@@ -2086,7 +2091,7 @@ export default function Cantus() {
                   destPinned={destinationIsPinned(m, false)}
                   pinDisabled={pinboard.length >= 4}
                   colors={colors} fontDisplay={fontDisplay} fontMono={fontMono}
-                  isMinor={!isMajorFamily(scaleId)}/>
+                  isMinor={!isMajorFamily(scaleId)} darkMode={darkMode}/>
               ))}
             </div>
           </div>
@@ -2104,7 +2109,7 @@ export default function Cantus() {
           }}>
             key of <span style={{ color: scale.color }}>{asciiName(rootMidi, useFlats)} {scale.name}</span>
           </div>
-          <ScaleRibbon rootIdx={rootMidi} scaleId={scaleId} colors={colors} fontMono={fontMono} fontDisplay={fontDisplay} useFlats={useFlats}/>
+          <ScaleRibbon rootIdx={rootMidi} scaleId={scaleId} colors={colors} fontMono={fontMono} fontDisplay={fontDisplay} useFlats={useFlats} darkMode={darkMode}/>
           <div style={{ marginTop: '14px', fontFamily: fontUI, fontSize: '13px', color: colors.muted, fontStyle: 'italic' }}>
             {scale.feel} · {scale.steps.length} notes · root on the left
           </div>
@@ -2319,6 +2324,92 @@ function Kbd({ children, c }) {
       borderBottomWidth: 2, borderRadius: 3,
       fontSize: '10px', color: c.ink, minWidth: 14, textAlign: 'center',
     }}>{children}</span>
+  );
+}
+
+// ─── HeaderTipButton ───
+// Persistent support entry in the page header. Renders a small heart-chip
+// (TIP) that opens a popover with the same PayPal + UPI options as the
+// bottom DonateRow. Stays visible at all times without crowding the
+// chrome — the chip is the same size as the other header util buttons.
+function HeaderTipButton({ colors, fontMono, fontDisplay, showToast }) {
+  const PAYPAL_URL = 'https://paypal.me/jasonzac?locale.x=en_GB&country.x=IN';
+  const UPI_VPA    = 'jasonzac-1@okhdfcbank';
+  const UPI_NAME   = 'Jason Zachariah';
+  const upiLink = `upi://pay?pa=${encodeURIComponent(UPI_VPA)}&pn=${encodeURIComponent(UPI_NAME)}&cu=INR&tn=${encodeURIComponent('Cantus support')}`;
+
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    const onEsc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [open]);
+
+  const isMobile = typeof navigator !== 'undefined' && /android|iphone|ipad|ipod/i.test(navigator.userAgent || '');
+  const copyVPA = async (e) => {
+    if (!isMobile) {
+      e.preventDefault();
+      try {
+        await navigator.clipboard.writeText(UPI_VPA);
+        showToast('UPI ID copied');
+      } catch {
+        showToast('UPI: ' + UPI_VPA, 'ok');
+      }
+    }
+    setOpen(false);
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(v => !v)}
+        style={{
+          ...headerUtilBtn(colors, fontMono),
+          background: open ? colors.spiceBg : 'transparent',
+          color: colors.spice, borderColor: colors.spice,
+        }}
+        title="Support Cantus — PayPal or UPI"
+        aria-haspopup="dialog" aria-expanded={open}>
+        <Heart size={12} fill={colors.spice} strokeWidth={0}/> TIP
+      </button>
+      {open && (
+        <div role="dialog" style={{
+          position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 50,
+          minWidth: 240, padding: 14,
+          background: colors.paper, border: `1px solid ${colors.line}`, borderRadius: 10,
+          boxShadow: '0 10px 30px rgba(0,0,0,0.18)',
+          animation: 'toastIn 160ms ease-out both',
+        }}>
+          <div style={{ fontFamily: fontDisplay, fontSize: 14, fontStyle: 'italic', color: colors.ink, marginBottom: 2 }}>
+            Cantus is free — always.
+          </div>
+          <div style={{ fontFamily: fontMono, fontSize: 10, letterSpacing: '0.06em', color: colors.muted, marginBottom: 12 }}>
+            a small tip keeps the lights on
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <a href={PAYPAL_URL} target="_blank" rel="noopener noreferrer"
+              onClick={() => setOpen(false)}
+              style={{ ...donateBtn(colors, fontMono, 'teal'), justifyContent: 'center' }}>
+              <Heart size={12}/> PayPal
+            </a>
+            <a href={upiLink} onClick={copyVPA}
+              style={{ ...donateBtn(colors, fontMono, 'gold'), justifyContent: 'center' }}
+              title={`UPI · ${UPI_VPA}`}>
+              <Copy size={12}/> UPI · {UPI_VPA}
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2557,16 +2648,17 @@ function PinShortcut({ onPin, destPinned, pinDisabled, colors, hover }) {
 }
 
 // Primary (bigger, prominent) card
-function BigMoveCard({ move, primary, alt, onPrimary, onAlt, onPin, destPinned, pinDisabled, colors, fontDisplay, fontMono, isMinor }) {
+function BigMoveCard({ move, primary, alt, onPrimary, onAlt, onPin, destPinned, pinDisabled, colors, fontDisplay, fontMono, isMinor, darkMode }) {
   const [hover, setHover] = useState(false);
   const family = INTERVAL_COLORS[move.fam];
+  const restBg = darkMode ? family.accent + '22' : family.bg;
   return (
     <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{
       position: 'relative',
       padding: '14px 32px 12px 14px',
-      background: hover ? family.accent : family.bg,
+      background: hover ? family.accent : restBg,
       color: hover ? '#FBFAF5' : colors.ink,
-      border: hover ? `1.5px solid ${family.accent}` : `1.5px solid ${family.accent}33`,
+      border: hover ? `1.5px solid ${family.accent}` : `1.5px solid ${family.accent}${darkMode ? '55' : '33'}`,
       borderRadius: '8px', transition: 'all 200ms cubic-bezier(0.2, 0.9, 0.2, 1)',
       transform: hover ? 'translateY(-2px)' : 'translateY(0)',
       boxShadow: hover ? `0 6px 16px ${family.accent}44` : 'none',
@@ -2617,16 +2709,17 @@ function BigMoveCard({ move, primary, alt, onPrimary, onAlt, onPin, destPinned, 
 }
 
 // Secondary (compact) card
-function SmallMoveCard({ move, primary, onPrimary, onPin, destPinned, pinDisabled, colors, fontDisplay, fontMono, isMinor }) {
+function SmallMoveCard({ move, primary, onPrimary, onPin, destPinned, pinDisabled, colors, fontDisplay, fontMono, isMinor, darkMode }) {
   const [hover, setHover] = useState(false);
   const family = INTERVAL_COLORS[move.fam];
+  const restBg = darkMode ? family.accent + '22' : family.bg;
   return (
     <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{
       position: 'relative',
       padding: '10px 28px 9px 10px',
-      background: hover ? family.accent : family.bg,
+      background: hover ? family.accent : restBg,
       color: hover ? '#FBFAF5' : colors.ink,
-      border: `1px solid ${hover ? family.accent : family.accent + '22'}`,
+      border: `1px solid ${hover ? family.accent : family.accent + (darkMode ? '44' : '22')}`,
       borderRadius: '6px', transition: 'all 180ms ease',
       display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3,
       minHeight: 68,
