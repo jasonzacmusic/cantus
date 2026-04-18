@@ -454,9 +454,17 @@ export default function Cantus() {
   const [metronomeOn, setMetronomeOn] = useState(false);
   const [guideOpen, setGuideOpen]     = useState(false);
 
+  // ─── Transport (live-adjustable) ───
+  const [bpm, setBpm]                 = useState(82);
+  const [pattern, setPattern]         = useState('arpeggio');  // arpeggio | block | alberti | waltz | bossa | drone | strum
+  const [timeSig, setTimeSig]         = useState('4/4');       // '4/4' | '3/4'
+  const [metroVol, setMetroVol]       = useState(0.6);
+  const [masterVol, setMasterVol]     = useState(0.9);
+
   const synthRef = useRef(null);
-  const padRef = useRef(null);
+  const padRef = useRef(null);  // aliased to piano sampler for low-octave foundation
   const clickSynthRef = useRef(null);
+  const engineRef = useRef(null);
   const audioReadyRef = useRef(false);
   const initPromiseRef = useRef(null);
   const cinemaRef = useRef(null);
@@ -466,6 +474,16 @@ export default function Cantus() {
   const progressionLoopIdxRef = useRef(0);
   const cinemaAutoStartedRef = useRef(false);
 
+  // Refs mirror transport state so in-flight schedulers read fresh values
+  const bpmRef        = useRef(82);
+  const patternRef    = useRef('arpeggio');
+  const timeSigRef    = useRef('4/4');
+  const metroOnRef    = useRef(false);
+  useEffect(() => { bpmRef.current = bpm; }, [bpm]);
+  useEffect(() => { patternRef.current = pattern; }, [pattern]);
+  useEffect(() => { timeSigRef.current = timeSig; }, [timeSig]);
+  useEffect(() => { metroOnRef.current = metronomeOn; }, [metronomeOn]);
+
   const initAudio = useCallback(async () => {
     if (audioReadyRef.current) return;
     if (initPromiseRef.current) return initPromiseRef.current;
@@ -473,9 +491,13 @@ export default function Cantus() {
     initPromiseRef.current = (async () => {
       try {
         const engine = await initAudioEngine();
+        engineRef.current = engine;
         synthRef.current = engine.piano;
-        padRef.current = engine.pad;
+        padRef.current = engine.piano;  // piano doubles as the low-octave pad layer
         clickSynthRef.current = engine.click;
+        // Apply current volume state to the engine
+        try { engine.setMasterVolume(masterVol); } catch {}
+        try { engine.setMetroVolume(metroVol); } catch {}
         audioReadyRef.current = true;
         setAudioError(null);
       } catch (err) {
@@ -486,7 +508,29 @@ export default function Cantus() {
       }
     })();
     return initPromiseRef.current;
-  }, []);
+  }, [masterVol, metroVol]);
+
+  // Live volume control — ramped, so sliders never click
+  useEffect(() => {
+    engineRef.current?.setMasterVolume(masterVol);
+  }, [masterVol]);
+  useEffect(() => {
+    engineRef.current?.setMetroVolume(metroVol);
+  }, [metroVol]);
+
+  // Pattern → instrument mapping. Changing pattern triggers a lazy instrument load.
+  const instrumentForPattern = (p) => {
+    if (p === 'waltz') return 'harp';
+    if (p === 'bossa' || p === 'strum') return 'nylon';
+    return 'piano';
+  };
+
+  // Pre-load the instrument for the current pattern (once audio is ready).
+  useEffect(() => {
+    if (!audioReadyRef.current || !engineRef.current) return;
+    const id = instrumentForPattern(pattern);
+    engineRef.current.loadInstrument(id).catch(err => console.warn('sample load failed:', err));
+  }, [pattern]);
 
   // Strummed block chord — each note triggered ~20ms after the previous.
   // Makes the chord feel pianistic instead of synthesizer-blocky.
@@ -875,6 +919,112 @@ export default function Cantus() {
   //   - Stop cancels the scheduled setTimeout cleanly
   //   - It loops forever — no "end of progression" stutter
 
+  // ─── Pattern library ───
+  // Each pattern returns a list of { note, time, dur, vel } events relative
+  // to audioTime=0 for one bar. `names` is chord tones low→high (Tone.js note
+  // strings). BEAT is seconds per beat, BEATS is beats in this bar.
+  //
+  // Designed to feel musical across cultures and levels:
+  //   arpeggio  — ascending, universal (piano)
+  //   block     — straight chord, gospel/hymn (piano)
+  //   alberti   — lo-hi-mid-hi, Classical (piano)
+  //   waltz     — bass then chord-chord, 3/4 folk/jazz (harp)
+  //   bossa     — syncopated Brazilian comping (nylon)
+  //   drone     — held sustain + melodic top, Carnatic/Celtic (piano)
+  //   strum     — rolled chord attacks, global folk (nylon)
+  const buildPatternEvents = (patternId, names, BEAT, BEATS) => {
+    const bar = BEAT * BEATS;
+    const low = names.map(octDown);
+    const ev = [];
+
+    if (patternId === 'block') {
+      // Single block chord held most of the bar
+      names.forEach((n, j) => ev.push({ note: n, time: j * 0.018, dur: bar * 0.88, vel: 0.78 }));
+      // Low octave foundation
+      ev.push({ note: low, time: 0.04, dur: bar * 0.9, vel: 0.5, layer: 'low' });
+      return ev;
+    }
+
+    if (patternId === 'alberti') {
+      // Low - high - mid - high (the Classical Alberti bass), one pair per beat
+      const l = names[0], h = names[names.length - 1], m = names[Math.floor(names.length / 2)] || names[0];
+      const order = [l, h, m, h];
+      const noteDur = BEAT * 0.92;
+      for (let b = 0; b < BEATS; b++) {
+        ev.push({ note: order[b % order.length], time: b * BEAT, dur: noteDur, vel: 0.72 });
+      }
+      // Low octave sustain underneath
+      ev.push({ note: low, time: 0.04, dur: bar * 0.95, vel: 0.4, layer: 'low' });
+      return ev;
+    }
+
+    if (patternId === 'waltz') {
+      // 3/4 feel regardless of BEATS. Bass on 1, chord on 2 and 3.
+      // If BEATS != 3 we still lay this over the bar's first 3 beats and rest.
+      const bassNote = low[0];
+      ev.push({ note: bassNote, time: 0, dur: BEAT * 0.8, vel: 0.7, layer: 'low' });
+      for (let c = 1; c < 3; c++) {
+        names.forEach((n, j) => ev.push({ note: n, time: c * BEAT + j * 0.012, dur: BEAT * 0.55, vel: 0.62 }));
+      }
+      return ev;
+    }
+
+    if (patternId === 'bossa') {
+      // Syncopated bossa: bass on 1 & 3, chord hits on "&" of 2 and on 4.5
+      const bassNote = low[0];
+      ev.push({ note: bassNote, time: 0,            dur: BEAT * 0.9,  vel: 0.72, layer: 'low' });
+      ev.push({ note: bassNote, time: 2 * BEAT,     dur: BEAT * 0.9,  vel: 0.68, layer: 'low' });
+      const chordHits = [BEAT * 1.5, BEAT * 2.75, BEAT * 3.5];
+      chordHits.forEach(t => {
+        if (t >= bar) return;
+        names.forEach((n, j) => ev.push({ note: n, time: t + j * 0.01, dur: BEAT * 0.55, vel: 0.62 }));
+      });
+      return ev;
+    }
+
+    if (patternId === 'drone') {
+      // Sustained foundation + melodic top-note arpeggio
+      ev.push({ note: low, time: 0, dur: bar * 0.97, vel: 0.48, layer: 'low' });
+      ev.push({ note: names, time: 0.05, dur: bar * 0.95, vel: 0.45 });
+      // Gentle top-note pulses on each beat
+      const top = names[names.length - 1];
+      for (let b = 0; b < BEATS; b++) {
+        ev.push({ note: top, time: b * BEAT + 0.08, dur: BEAT * 0.6, vel: 0.5 });
+      }
+      return ev;
+    }
+
+    if (patternId === 'strum') {
+      // Rolled strum on each beat (guitar-flavored) — up-stroke low→high,
+      // light off-beat strum on '&' of 2 for movement
+      const rollGap = 0.028;
+      for (let b = 0; b < BEATS; b++) {
+        const up = b % 2 === 0;                      // down-strum on 1,3
+        const base = b * BEAT;
+        const seq = up ? names : [...names].reverse();
+        seq.forEach((n, j) => {
+          ev.push({ note: n, time: base + j * rollGap, dur: BEAT * 0.85, vel: up ? 0.78 : 0.62 });
+        });
+      }
+      // Low foundation
+      ev.push({ note: low[0], time: 0, dur: bar * 0.92, vel: 0.6, layer: 'low' });
+      return ev;
+    }
+
+    // DEFAULT — arpeggio + resolving block (the original feel)
+    const ARP_GAP = BEAT * 0.58;
+    names.forEach((n, j) => {
+      const vel = 0.68 + (j / Math.max(1, names.length - 1)) * 0.25;
+      ev.push({ note: n, time: j * ARP_GAP, dur: ARP_GAP * 1.15, vel });
+    });
+    ev.push({ note: low, time: 0.05, dur: bar * 0.92, vel: 0.5, layer: 'low' });
+    const blockAt = names.length * ARP_GAP + 0.04;
+    names.forEach((n, j) => {
+      ev.push({ note: n, time: blockAt + j * 0.02, dur: bar * 0.78 * 0.45, vel: 0.82 });
+    });
+    return ev;
+  };
+
   const playProgression = async () => {
     if (pinsData.length < 2) return;
     stopCinema(); clearArpTimers();
@@ -885,14 +1035,6 @@ export default function Cantus() {
     progressionCancelRef.current = false;
     progressionLoopIdxRef.current = 0;
 
-    // Tempo grid — 82 BPM is relaxed, musical, good for theory listening
-    const BPM = 82;
-    const BEAT = 60 / BPM;              // 0.731s per beat
-    const BEATS_PER_CHORD = 4;
-    const CHORD_DUR = BEAT * BEATS_PER_CHORD; // 2.93s per chord
-    const ARP_GAP = BEAT * 0.58;        // arpeggio notes span just over two beats
-    const HOLD = CHORD_DUR * 0.78;      // block chord holds most of the bar
-
     // Read freshly on each step — this is what makes reordering live-safe
     const getPinsSnapshot = () => pinsData;
 
@@ -900,33 +1042,36 @@ export default function Cantus() {
       const p = pinsSnap[pinIdx];
       if (!p) return;
 
+      // Fresh read of transport state every bar — live-adjustable
+      const curBpm      = bpmRef.current;
+      const curPattern  = patternRef.current;
+      const curTimeSig  = timeSigRef.current;
+      const curMetroOn  = metroOnRef.current;
+      const BEAT        = 60 / curBpm;
+      const BEATS       = curTimeSig === '3/4' ? 3 : 4;
+      const CHORD_DUR   = BEAT * BEATS;
+
       const displayHi = p.notes.map(displayMidi);
       const names = notesToToneNames(p.notes);
-      const padNotes = names.map(octDown);
 
-      // ARPEGGIO (scheduled at exact grid times)
-      names.forEach((n, j) => {
-        const vel = 0.68 + (j / Math.max(1, names.length - 1)) * 0.25;
-        synthRef.current.triggerAttackRelease(n, ARP_GAP * 1.15, audioTime + j * ARP_GAP, vel);
+      // Pick the instrument for this pattern. Fall back to piano if the
+      // sample bank isn't loaded yet (silent lazy-load kicked off by effect).
+      const instId = instrumentForPattern(curPattern);
+      const instruments = engineRef.current?.instruments || {};
+      const voice = instruments[instId] || synthRef.current;
+      const lowVoice = synthRef.current;  // piano always carries the low layer
+
+      // Build pattern events for this bar
+      const events = buildPatternEvents(curPattern, names, BEAT, BEATS);
+      events.forEach(e => {
+        const v = e.layer === 'low' ? lowVoice : voice;
+        if (!v) return;
+        try { v.triggerAttackRelease(e.note, e.dur, audioTime + e.time, e.vel); } catch {}
       });
 
-      // PAD — sustains the whole bar
-      padRef.current?.triggerAttackRelease(
-        padNotes,
-        CHORD_DUR * 0.92,
-        audioTime + 0.05,
-        0.5
-      );
-
-      // BLOCK CHORD — lands at beat 3 (after arpeggio resolves)
-      const blockAt = audioTime + names.length * ARP_GAP + 0.04;
-      names.forEach((n, j) => {
-        synthRef.current.triggerAttackRelease(n, HOLD * 0.45, blockAt + j * 0.02, 0.82);
-      });
-
-      // METRONOME — exactly 4 ticks on the beat
-      if (metronomeOn && clickSynthRef.current) {
-        for (let b = 0; b < BEATS_PER_CHORD; b++) {
+      // METRONOME — one tick per beat, accent on 1
+      if (curMetroOn && clickSynthRef.current) {
+        for (let b = 0; b < BEATS; b++) {
           const isDownbeat = b === 0;
           clickSynthRef.current.triggerAttackRelease(
             isDownbeat ? 'C6' : 'G5',
@@ -937,10 +1082,8 @@ export default function Cantus() {
         }
       }
 
-      // UI UPDATES (each note lights up on its beat)
-      const nowMs = performance.now();
-      const startMs = (audioTime - Tone.now()) * 1000; // ms from right-now until chord start
-      // Display update at chord start
+      // UI UPDATES
+      const startMs = (audioTime - Tone.now()) * 1000;
       const tChord = setTimeout(() => {
         if (progressionCancelRef.current) return;
         setRootMidi(p.rootMidi); setScaleId(p.scaleId);
@@ -950,18 +1093,18 @@ export default function Cantus() {
       }, Math.max(0, startMs));
       arpTimersRef.current.push(tChord);
 
-      // Active-midi highlights per arpeggio note
+      // Highlight each chord tone once per bar, spaced across the bar
+      const HI_GAP = (CHORD_DUR / Math.max(1, names.length)) * 1000;
       names.forEach((_, j) => {
         const t = setTimeout(() => {
           if (progressionCancelRef.current) return;
           setActiveMidi(displayHi[j]);
-        }, Math.max(0, startMs + j * ARP_GAP * 1000));
+        }, Math.max(0, startMs + j * HI_GAP));
         arpTimersRef.current.push(t);
       });
-      // Clear active-midi after the arpeggio is done
       const tClear = setTimeout(() => {
         if (!progressionCancelRef.current) setActiveMidi(null);
-      }, Math.max(0, startMs + names.length * ARP_GAP * 1000 + 80));
+      }, Math.max(0, startMs + CHORD_DUR * 1000 - 60));
       arpTimersRef.current.push(tClear);
     };
 
@@ -971,30 +1114,27 @@ export default function Cantus() {
 
       const pinsSnap = getPinsSnapshot();
       if (pinsSnap.length < 2) {
-        // Not enough pins any more — stop
         progressionCancelRef.current = false;
         setPlayingPinIdx(null);
         setActiveMidi(null);
         return;
       }
 
-      // Wrap the loop index to current pinboard length
       const idx = progressionLoopIdxRef.current % pinsSnap.length;
 
-      // Schedule THIS chord a small lookahead into the future so UI/audio line up
       const LOOKAHEAD = 0.12;
       const chordStart = Tone.now() + LOOKAHEAD;
       scheduleChord(chordStart, idx, pinsSnap);
 
-      // Advance for next iteration
       progressionLoopIdxRef.current = idx + 1;
 
-      // Reschedule step at the next chord boundary (in real ms)
-      const nextMs = (CHORD_DUR) * 1000;
+      // Next step uses the LIVE tempo — bpm/timeSig changes land at next bar
+      const curBpm = bpmRef.current;
+      const curBeats = timeSigRef.current === '3/4' ? 3 : 4;
+      const nextMs = (60 / curBpm) * curBeats * 1000;
       progressionStepRef.current = setTimeout(step, nextMs);
     };
 
-    // Kick off
     step();
   };
 
@@ -1431,6 +1571,99 @@ export default function Cantus() {
               )}
             </div>
           </div>
+
+          {/* TRANSPORT — pattern picker + tempo + time-sig + volumes.
+               All changes are live; playback is never interrupted. */}
+          {pinsData.length >= 2 && (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+              gap: 14,
+              padding: '14px 14px',
+              marginBottom: 18,
+              background: colors.paper,
+              border: `1px solid ${colors.line}`,
+              borderRadius: 8,
+            }}>
+              {/* PATTERN PICKER */}
+              <div>
+                <div style={{ fontFamily: fontMono, fontSize: '9px', letterSpacing: '0.2em', color: colors.muted, textTransform: 'uppercase', marginBottom: 6 }}>
+                  pattern · {instrumentForPattern(pattern)}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {[
+                    { id: 'arpeggio', label: 'Arpeggio' },
+                    { id: 'block',    label: 'Block' },
+                    { id: 'alberti',  label: 'Alberti' },
+                    { id: 'waltz',    label: 'Waltz' },
+                    { id: 'bossa',    label: 'Bossa' },
+                    { id: 'drone',    label: 'Drone' },
+                    { id: 'strum',    label: 'Strum' },
+                  ].map(p => (
+                    <button key={p.id} onClick={() => setPattern(p.id)}
+                      title={`${p.label} · ${instrumentForPattern(p.id)}`}
+                      style={{
+                        padding: '5px 10px', borderRadius: 999,
+                        background: pattern === p.id ? colors.ink : 'transparent',
+                        color: pattern === p.id ? colors.paper : colors.ink2,
+                        border: `1px solid ${pattern === p.id ? colors.ink : colors.line}`,
+                        fontFamily: fontMono, fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase',
+                        cursor: 'pointer', transition: 'all 150ms ease',
+                      }}>
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* TEMPO + TIME SIG */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                  <span style={{ fontFamily: fontMono, fontSize: '9px', letterSpacing: '0.2em', color: colors.muted, textTransform: 'uppercase' }}>
+                    tempo · {bpm} bpm
+                  </span>
+                  <div style={{ display: 'flex', gap: 3 }}>
+                    {['3/4', '4/4'].map(ts => (
+                      <button key={ts} onClick={() => setTimeSig(ts)} style={{
+                        padding: '2px 8px', borderRadius: 999,
+                        background: timeSig === ts ? colors.ink : 'transparent',
+                        color: timeSig === ts ? colors.paper : colors.ink2,
+                        border: `1px solid ${timeSig === ts ? colors.ink : colors.line}`,
+                        fontFamily: fontMono, fontSize: '9px', letterSpacing: '0.05em',
+                        cursor: 'pointer', transition: 'all 150ms ease',
+                      }}>{ts}</button>
+                    ))}
+                  </div>
+                </div>
+                <input type="range" min={50} max={160} step={1} value={bpm}
+                  onChange={(e) => setBpm(Number(e.target.value))}
+                  style={{ width: '100%', accentColor: colors.teal }}
+                />
+              </div>
+
+              {/* MASTER VOLUME */}
+              <div>
+                <div style={{ fontFamily: fontMono, fontSize: '9px', letterSpacing: '0.2em', color: colors.muted, textTransform: 'uppercase', marginBottom: 6 }}>
+                  master · {Math.round(masterVol * 100)}
+                </div>
+                <input type="range" min={0} max={1} step={0.01} value={masterVol}
+                  onChange={(e) => setMasterVol(Number(e.target.value))}
+                  style={{ width: '100%', accentColor: colors.teal }}
+                />
+              </div>
+
+              {/* METRONOME VOLUME */}
+              <div>
+                <div style={{ fontFamily: fontMono, fontSize: '9px', letterSpacing: '0.2em', color: colors.muted, textTransform: 'uppercase', marginBottom: 6 }}>
+                  metronome · {Math.round(metroVol * 100)}
+                </div>
+                <input type="range" min={0} max={1} step={0.01} value={metroVol}
+                  onChange={(e) => setMetroVol(Number(e.target.value))}
+                  style={{ width: '100%', accentColor: colors.gold }}
+                />
+              </div>
+            </div>
+          )}
 
           <div style={{ display: 'flex', alignItems: 'stretch', flexWrap: 'wrap', gap: 6, marginBottom: pinsData.length >= 2 ? '22px' : 0 }}>
             {[0, 1, 2, 3].map(slot => {
