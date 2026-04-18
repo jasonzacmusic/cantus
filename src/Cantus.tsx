@@ -801,11 +801,11 @@ export default function Cantus() {
     { label: 'Blade Runner',    steps: [[0,'m'], [3,'m'], [7,'M'], [8,'m']] },
   ];
 
+  REMOVED_PROG_END */
+
   // Refs track which pattern was used last so consecutive taps cycle forward
   const classicIdxRef = useRef(-1);
   const cinematicIdxRef = useRef(-1);
-
-  REMOVED_PROG_END */
 
   // CLASSIC: traditional diatonic progressions in 3rds (triads)
   const surpriseClassic = () => {
