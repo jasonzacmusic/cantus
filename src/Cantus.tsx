@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Play, RotateCcw, Film, Volume2, Disc3, Pin, X, PlayCircle, Square, Music2, Plus, Sparkles, Wand2, Flower2, Waves } from 'lucide-react';
+import { Play, RotateCcw, Film, Volume2, Disc3, Pin, X, PlayCircle, Square, Music2, Plus, Sparkles, Wand2, Flower2, Waves, Share2, Sun, Moon, Heart, Copy } from 'lucide-react';
 
 import { NOTES_SHARP, NOTES_FLAT, SCALES, SCALE_IDS } from './theory/scales';
 import { VOICINGS, START_DEGREES } from './theory/voicings';
@@ -461,6 +461,33 @@ export default function Cantus() {
   const [metroVol, setMetroVol]       = useState(0.6);
   const [masterVol, setMasterVol]     = useState(0.9);
 
+  // ─── UX state (dark mode, share toast, tap tempo) ───
+  const [darkMode, setDarkMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const saved = localStorage.getItem('cantus.dark');
+    if (saved !== null) return saved === '1';
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+  });
+  useEffect(() => {
+    try { localStorage.setItem('cantus.dark', darkMode ? '1' : '0'); } catch {}
+    // Sync mobile-browser chrome color + native scrollbar theme
+    const color = darkMode ? '#171623' : '#F6F1E7';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', color);
+    document.documentElement.style.colorScheme = darkMode ? 'dark' : 'light';
+    document.body.style.background = color;
+  }, [darkMode]);
+
+  const [toast, setToast] = useState(null);              // { msg, tone }
+  const toastTimerRef = useRef(null);
+  const showToast = (msg, tone = 'ok') => {
+    setToast({ msg, tone });
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 2000);
+  };
+
+  const tapTimesRef = useRef([]);
+
   const synthRef = useRef(null);
   const padRef = useRef(null);  // aliased to piano sampler for low-octave foundation
   const clickSynthRef = useRef(null);
@@ -531,6 +558,175 @@ export default function Cantus() {
     const id = instrumentForPattern(pattern);
     engineRef.current.loadInstrument(id).catch(err => console.warn('sample load failed:', err));
   }, [pattern]);
+
+  // ─── Shareable URL: encode/decode pinboard + transport in the hash.
+  //
+  // Format: #s=<base64url(JSON)>
+  // JSON shape: { pins: [{r, s, v, d}], pat, bpm, ts }
+  // Short keys keep URLs copy-friendly.
+  //
+  // Read-once on mount. Debounced write on any relevant state change, but
+  // we do NOT push history entries — just replace, so Back still exits.
+  const urlHydratedRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (urlHydratedRef.current) return;
+    urlHydratedRef.current = true;
+    try {
+      const h = window.location.hash.replace(/^#/, '');
+      const m = h.match(/(?:^|&)s=([^&]+)/);
+      if (!m) return;
+      const json = JSON.parse(atob(m[1].replace(/-/g, '+').replace(/_/g, '/')));
+      if (Array.isArray(json.pins) && json.pins.length) {
+        setPinboard(json.pins.map((p, i) => ({
+          id: Date.now() + i,
+          rootMidi: p.r, scaleId: p.s, voicingId: p.v, startDegId: p.d,
+        })));
+        const first = json.pins[0];
+        setRootMidi(first.r); setScaleId(first.s);
+        setVoicingId(first.v); setStartDegId(first.d);
+      }
+      if (json.pat) setPattern(json.pat);
+      if (typeof json.bpm === 'number') setBpm(Math.max(40, Math.min(200, json.bpm)));
+      if (json.ts === '3/4' || json.ts === '4/4') setTimeSig(json.ts);
+      setLastMove('loaded from link');
+    } catch (err) {
+      console.warn('URL hydration failed:', err);
+    }
+  }, []);
+
+  // Debounced writer — only after hydration completes, and only when there
+  // is something to share (≥1 pin) or non-default transport state.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const t = setTimeout(() => {
+      try {
+        if (pinboard.length === 0) {
+          if (window.location.hash) {
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+          }
+          return;
+        }
+        const payload = {
+          pins: pinboard.map(p => ({ r: p.rootMidi, s: p.scaleId, v: p.voicingId, d: p.startDegId })),
+          pat: pattern, bpm, ts: timeSig,
+        };
+        const b64 = btoa(JSON.stringify(payload))
+          .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        history.replaceState(null, '', `#s=${b64}`);
+      } catch {}
+    }, 250);
+    return () => clearTimeout(t);
+  }, [pinboard, pattern, bpm, timeSig]);
+
+  // Share: copy current URL (or a freshly-built one if hash isn't current).
+  const shareProgression = useCallback(async () => {
+    try {
+      const url = window.location.href;
+      await navigator.clipboard.writeText(url);
+      showToast('link copied');
+    } catch {
+      showToast('copy failed — select the URL manually', 'err');
+    }
+  }, []);
+
+  // ─── Tap tempo: press T in quick succession; BPM is derived from the
+  // average of the last 3 intervals. Resets if >2s gap.
+  const tapTempo = useCallback(() => {
+    const now = performance.now();
+    const arr = tapTimesRef.current;
+    if (arr.length && now - arr[arr.length - 1] > 2000) arr.length = 0;
+    arr.push(now);
+    while (arr.length > 5) arr.shift();
+    if (arr.length >= 2) {
+      const intervals = [];
+      for (let i = 1; i < arr.length; i++) intervals.push(arr[i] - arr[i - 1]);
+      const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      const newBpm = Math.round(60000 / avg);
+      if (newBpm >= 40 && newBpm <= 200) {
+        setBpm(newBpm);
+        showToast(`tempo · ${newBpm} bpm`);
+      }
+    } else {
+      showToast('tap again…');
+    }
+  }, []);
+
+  // ─── Keyboard shortcuts ───
+  //   space  play/stop progression (needs ≥2 pins)
+  //   m      toggle metronome
+  //   1-4    load the nth pinned chord
+  //   ↑ / ↓  BPM ±1  (+Shift for ±5)
+  //   [ / ]  prev/next pattern
+  //   t      tap tempo
+  //   s      share URL
+  //   d      toggle dark mode
+  //   ?      open guide
+  // Ignored when focus is in an input/textarea/contenteditable.
+  const PATTERNS_ORDER = ['arpeggio', 'block', 'alberti', 'waltz', 'bossa', 'drone', 'strum'];
+  useEffect(() => {
+    const handler = (e) => {
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const k = e.key;
+
+      if (k === ' ' || k === 'Spacebar') {
+        e.preventDefault();
+        if (playingPinIdxRef.current !== null) stopProgressionRef.current?.();
+        else if (pinboardRef.current.length >= 2) playProgressionRef.current?.();
+        return;
+      }
+      if (k === 'm' || k === 'M') { e.preventDefault(); setMetronomeOn(v => !v); return; }
+      if (k === 'd' || k === 'D') { e.preventDefault(); setDarkMode(v => !v); return; }
+      if (k === 's' || k === 'S') { e.preventDefault(); shareProgressionRef.current?.(); return; }
+      if (k === 't' || k === 'T') { e.preventDefault(); tapTempoRef.current?.(); return; }
+      if (k === '?')             { e.preventDefault(); setGuideOpen(true); return; }
+
+      if (k >= '1' && k <= '4') {
+        const idx = parseInt(k, 10) - 1;
+        const pin = pinboardRef.current[idx];
+        if (pin) { e.preventDefault(); loadPinRef.current?.(pin); }
+        return;
+      }
+
+      if (k === 'ArrowUp' || k === 'ArrowDown') {
+        e.preventDefault();
+        const dir = k === 'ArrowUp' ? 1 : -1;
+        const step = e.shiftKey ? 5 : 1;
+        setBpm(b => Math.max(40, Math.min(200, b + dir * step)));
+        return;
+      }
+
+      if (k === '[' || k === ']') {
+        e.preventDefault();
+        const cur = PATTERNS_ORDER.indexOf(patternRef.current);
+        const nxt = k === ']'
+          ? (cur + 1) % PATTERNS_ORDER.length
+          : (cur - 1 + PATTERNS_ORDER.length) % PATTERNS_ORDER.length;
+        setPattern(PATTERNS_ORDER[nxt]);
+        showToast(`pattern · ${PATTERNS_ORDER[nxt]}`);
+        return;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Refs so the keyboard handler (stable) reads fresh state every key-press
+  const playingPinIdxRef     = useRef(null);
+  const pinboardRef          = useRef([]);
+  const loadPinRef           = useRef(null);
+  const playProgressionRef   = useRef(null);
+  const stopProgressionRef   = useRef(null);
+  const shareProgressionRef  = useRef(null);
+  const tapTempoRef          = useRef(null);
+  useEffect(() => { playingPinIdxRef.current = playingPinIdx; }, [playingPinIdx]);
+  useEffect(() => { pinboardRef.current = pinboard; }, [pinboard]);
+  useEffect(() => { shareProgressionRef.current = shareProgression; }, [shareProgression]);
+  useEffect(() => { tapTempoRef.current = tapTempo; }, [tapTempo]);
 
   // Strummed block chord — each note triggered ~20ms after the previous.
   // Makes the chord feel pianistic instead of synthesizer-blocky.
@@ -906,6 +1102,10 @@ export default function Cantus() {
     setLastMove(`pin · ${chordNameFor(pin.rootMidi, pin.scaleId, preferFlats(pin.rootMidi, pin.scaleId))}`);
   };
 
+  // Keep keyboard-shortcut refs fresh with each render
+  loadPinRef.current         = loadPin;
+  stopProgressionRef.current = stopProgression;
+
   // ─── PROGRESSION PLAYBACK — looping, grid-aligned, reorder-safe ───
   //
   // Design: everything is scheduled against a fixed tempo grid.
@@ -1137,6 +1337,7 @@ export default function Cantus() {
 
     step();
   };
+  playProgressionRef.current = playProgression;
 
   // Navigation actions — state-only, no sound. User must click Hear it / Bloom / Ripple.
   const doMove = (move, flipQuality = false) => {
@@ -1259,7 +1460,13 @@ export default function Cantus() {
     return chordNameFor(newRoot, q, flats);
   };
 
-  const colors = {
+  const colors = darkMode ? {
+    // Dark palette — deep indigo "night-paper" keeps the bookish warmth
+    paper: '#171623', paperD: '#1F1E2E', ink: '#F1EDE0', ink2: '#B8B0C7',
+    teal: '#6FB3C0', spice: '#E07A6B', spiceBg: 'rgba(224, 122, 107, 0.12)',
+    gold: '#D9B155', goldBg: 'rgba(217, 177, 85, 0.14)',
+    muted: '#7E7694', line: 'rgba(241, 237, 224, 0.12)',
+  } : {
     paper: '#F6F1E7', paperD: '#EDE5D0', ink: '#1F1E2E', ink2: '#524768',
     teal: '#2D5E6B', spice: '#C64B3B', spiceBg: 'rgba(198, 75, 59, 0.08)',
     gold: '#B88A2E', goldBg: 'rgba(184, 138, 46, 0.10)',
@@ -1281,13 +1488,17 @@ export default function Cantus() {
     <div style={{
       minHeight: '100vh', background: colors.paper, color: colors.ink,
       fontFamily: fontUI, padding: '32px 20px 60px', position: 'relative', overflow: 'hidden',
+      transition: 'background 240ms ease, color 240ms ease',
     }}>
       <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
 
+      {/* Paper-grain noise overlay. In dark mode, invert the blend so it
+          appears as subtle highlights rather than smudgy darkening. */}
       <div aria-hidden style={{
         position: 'absolute', inset: 0, pointerEvents: 'none',
         backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence baseFrequency='0.85' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.15  0 0 0 0 0.12  0 0 0 0 0.1  0 0 0 0.06 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")",
-        opacity: 0.55, mixBlendMode: 'multiply',
+        opacity: darkMode ? 0.25 : 0.55,
+        mixBlendMode: darkMode ? 'screen' : 'multiply',
       }}/>
 
       <div style={{ maxWidth: '960px', margin: '0 auto', position: 'relative', zIndex: 1 }}>
@@ -1325,6 +1536,17 @@ export default function Cantus() {
             </button>
             <button onClick={reset} style={headerUtilBtn(colors, fontMono)} title="Reset to Em">
               <RotateCcw size={12}/> RESET
+            </button>
+            <button onClick={shareProgression}
+              style={headerUtilBtn(colors, fontMono)}
+              title="Copy a shareable link to this progression (S)">
+              <Share2 size={12}/> SHARE
+            </button>
+            <button onClick={() => setDarkMode(v => !v)}
+              style={headerUtilBtn(colors, fontMono)}
+              title={darkMode ? 'Light mode (D)' : 'Dark mode (D)'}
+              aria-label="Toggle dark mode">
+              {darkMode ? <Sun size={12}/> : <Moon size={12}/>}
             </button>
           </div>
         </header>
@@ -1888,10 +2110,43 @@ export default function Cantus() {
           </div>
         </section>
 
-        <footer style={{ textAlign: 'center', fontFamily: fontMono, fontSize: '10px', letterSpacing: '0.15em', color: colors.muted, marginTop: 32 }}>
+        {/* KEYBOARD SHORTCUTS — subtle helper */}
+        <div className="cantus-keys" style={{
+          marginTop: 26, padding: '12px 14px',
+          background: colors.paperD, border: `1px solid ${colors.line}`, borderRadius: 8,
+          fontFamily: fontMono, fontSize: '10px', letterSpacing: '0.08em',
+          color: colors.ink2, lineHeight: 1.9,
+        }}>
+          <span style={{ color: colors.muted, textTransform: 'uppercase', letterSpacing: '0.22em', marginRight: 10 }}>shortcuts</span>
+          <Kbd c={colors}>space</Kbd> play/stop · <Kbd c={colors}>1</Kbd>–<Kbd c={colors}>4</Kbd> jump to pin ·{' '}
+          <Kbd c={colors}>M</Kbd> metronome · <Kbd c={colors}>T</Kbd> tap tempo ·{' '}
+          <Kbd c={colors}>↑</Kbd><Kbd c={colors}>↓</Kbd> bpm · <Kbd c={colors}>[</Kbd><Kbd c={colors}>]</Kbd> pattern ·{' '}
+          <Kbd c={colors}>S</Kbd> share · <Kbd c={colors}>D</Kbd> dark mode · <Kbd c={colors}>?</Kbd> guide
+        </div>
+
+        {/* DONATE — compact, non-intrusive. Leaves the design alone. */}
+        <DonateRow colors={colors} fontDisplay={fontDisplay} fontMono={fontMono} showToast={showToast} />
+
+        <footer style={{ textAlign: 'center', fontFamily: fontMono, fontSize: '10px', letterSpacing: '0.15em', color: colors.muted, marginTop: 24 }}>
           Cantus · Nathaniel School of Music
         </footer>
       </div>
+
+      {/* TOAST */}
+      {toast && (
+        <div role="status" aria-live="polite" style={{
+          position: 'fixed', bottom: 26, left: '50%', transform: 'translateX(-50%)',
+          background: colors.ink, color: colors.paper,
+          padding: '10px 18px', borderRadius: 999,
+          fontFamily: fontMono, fontSize: '11px', letterSpacing: '0.12em', textTransform: 'uppercase',
+          boxShadow: `0 6px 24px rgba(0,0,0,${darkMode ? 0.45 : 0.18})`,
+          zIndex: 40,
+          animation: 'toastIn 180ms ease-out',
+          borderLeft: `3px solid ${toast.tone === 'err' ? colors.spice : colors.gold}`,
+        }}>
+          {toast.msg}
+        </div>
+      )}
 
       {guideOpen && (
         <LearnGuide
@@ -1929,6 +2184,35 @@ export default function Cantus() {
         @keyframes metroPulse {
           0%, 100% { transform: scale(1); opacity: 1; }
           50%      { transform: scale(1.5); opacity: 0.75; }
+        }
+        @keyframes toastIn {
+          0%   { opacity: 0; transform: translate(-50%, 8px); }
+          100% { opacity: 1; transform: translate(-50%, 0); }
+        }
+
+        /* Mobile polish — tighter padding, shortcuts helper hidden on phones */
+        @media (max-width: 600px) {
+          .cantus-keys { display: none; }
+          .cantus-donate {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 10px;
+          }
+        }
+        /* Touch targets never smaller than 36px on phones */
+        @media (pointer: coarse) {
+          button, a[role="button"] { min-height: 36px; }
+          input[type="range"] { height: 32px; }
+        }
+        /* Native range slider — theme-aware */
+        input[type="range"] { accent-color: currentColor; }
+        /* Reduce motion on request */
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+            animation-duration: 0.001ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.001ms !important;
+          }
         }
 
         /* Responsive interval grids
@@ -2024,6 +2308,96 @@ function TierLabel({ arrow, label, colors, fontMono, fontDisplay }) {
       <div style={{ flex: 1, height: 1, background: colors.line }}/>
     </div>
   );
+}
+
+// ─── Kbd ─── inline keyboard-key glyph
+function Kbd({ children, c }) {
+  return (
+    <span style={{
+      display: 'inline-block', padding: '1px 6px', margin: '0 2px',
+      background: c.paper, border: `1px solid ${c.line}`,
+      borderBottomWidth: 2, borderRadius: 3,
+      fontSize: '10px', color: c.ink, minWidth: 14, textAlign: 'center',
+    }}>{children}</span>
+  );
+}
+
+// ─── DonateRow ───
+// Compact support bar that sits above the footer. Non-intrusive by design:
+// two pill links, a soft divider, and a tiny "why" note. On tap, UPI opens
+// the user's UPI app on mobile via the upi://pay deep link; on desktop we
+// copy the VPA to the clipboard and show a toast.
+function DonateRow({ colors, fontDisplay, fontMono, showToast }) {
+  const PAYPAL_URL = 'https://paypal.me/jasonzac?locale.x=en_GB&country.x=IN';
+  const UPI_VPA    = 'jasonzac-1@okhdfcbank';
+  const UPI_NAME   = 'Jason Zachariah';
+  const upiLink = `upi://pay?pa=${encodeURIComponent(UPI_VPA)}&pn=${encodeURIComponent(UPI_NAME)}&cu=INR&tn=${encodeURIComponent('Cantus support')}`;
+
+  const copyVPA = async (e) => {
+    // On mobile let the upi:// link fire; on desktop, intercept and copy.
+    const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent || '');
+    if (!isMobile) {
+      e.preventDefault();
+      try {
+        await navigator.clipboard.writeText(UPI_VPA);
+        showToast('UPI ID copied');
+      } catch {
+        showToast('UPI: ' + UPI_VPA, 'ok');
+      }
+    }
+  };
+
+  return (
+    <div className="cantus-donate" style={{
+      marginTop: 20, padding: '14px 18px',
+      background: colors.paperD, border: `1px solid ${colors.line}`, borderRadius: 8,
+      display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 26, height: 26, borderRadius: 999, background: colors.spiceBg, color: colors.spice, flex: '0 0 auto',
+        }}>
+          <Heart size={14} fill={colors.spice} strokeWidth={0}/>
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontFamily: fontDisplay, fontSize: 14, color: colors.ink, fontStyle: 'italic' }}>
+            Cantus is free — always.
+          </div>
+          <div style={{ fontFamily: fontMono, fontSize: 10, letterSpacing: '0.08em', color: colors.muted, marginTop: 2 }}>
+            if it helps your teaching or playing, a small tip keeps the lights on
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <a href={PAYPAL_URL} target="_blank" rel="noopener noreferrer"
+          style={donateBtn(colors, fontMono, 'teal')}
+          title="Support via PayPal (opens paypal.me)">
+          <Heart size={12}/> PayPal
+        </a>
+        <a href={upiLink} onClick={copyVPA}
+          style={donateBtn(colors, fontMono, 'gold')}
+          title={`UPI · ${UPI_VPA}`}>
+          <Copy size={12}/> UPI
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function donateBtn(colors, fontMono, tone) {
+  const bg   = tone === 'gold' ? colors.goldBg : colors.spiceBg;
+  const brd  = tone === 'gold' ? colors.gold   : colors.teal;
+  const col  = tone === 'gold' ? colors.gold   : colors.teal;
+  return {
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    padding: '7px 14px', borderRadius: 999,
+    background: bg, border: `1px solid ${brd}`, color: col,
+    fontFamily: fontMono, fontSize: '10px', letterSpacing: '0.12em', textTransform: 'uppercase',
+    textDecoration: 'none', cursor: 'pointer',
+    transition: 'all 160ms ease',
+  };
 }
 
 function IntervalBadge({ label, colors, fontMono }) {
