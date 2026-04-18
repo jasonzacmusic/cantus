@@ -16,8 +16,6 @@ import {
 } from './theory/chord';
 import { initAudio as initAudioEngine, getEngine, octDown, Tone } from './audio/engine';
 
-const NSM_LOGO = null;
-
 // (theory constants and helpers live in ./theory/* — imported above)
 /* REMOVED_BLOCK_START
 const _OLD_SCALES_REMOVED = {
@@ -1157,19 +1155,13 @@ export default function Cantus() {
         {/* HEADER */}
         <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '28px', flexWrap: 'wrap', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            {NSM_LOGO ? (
-              <img src={NSM_LOGO} alt="Nathaniel School of Music"
-                style={{ height: 68, width: 'auto', display: 'block' }}/>
-            ) : (
-              <div style={{
-                width: 62, height: 62, borderRadius: '50%',
-                background: colors.paperD,
-                border: `1.5px solid ${colors.ink2}`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontFamily: fontDisplay, fontSize: 34, fontStyle: 'italic', fontWeight: 500,
-                color: colors.ink2, letterSpacing: '-0.02em',
-              }}>N</div>
-            )}
+            <img
+              src="/nsm-logo.png"
+              alt="Nathaniel School of Music"
+              style={{ height: 72, width: 'auto', display: 'block' }}
+              decoding="async"
+              loading="eager"
+            />
             <div>
               <div style={{ fontFamily: fontMono, fontSize: '10px', letterSpacing: '0.22em', color: colors.ink2, textTransform: 'uppercase' }}>
                 Nathaniel School of Music · voicing lab

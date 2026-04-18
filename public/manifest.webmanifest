@@ -1,0 +1,17 @@
+{
+  "name": "Cantus · Nathaniel School of Music",
+  "short_name": "Cantus",
+  "description": "A voicing lab for chord exploration — fourteen scales, six voicings, classic and cinematic progressions.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F6F1E7",
+  "theme_color": "#F6F1E7",
+  "categories": ["music", "education"],
+  "icons": [
+    { "src": "/nsm-logo-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/nsm-logo-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/nsm-logo-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
