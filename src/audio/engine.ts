@@ -27,13 +27,22 @@ const NYLON_SAMPLES: Record<string, string> = {
   'D5': 'D5.mp3', 'E5': 'E5.mp3',
 };
 
+// Steel-string acoustic guitar — nbrosowsky "guitar-acoustic" folder.
+// Warmer + more familiar to pop/folk/indie guitar students than the
+// classical nylon set.
+const ACOUSTIC_SAMPLES: Record<string, string> = {
+  'E2': 'E2.mp3', 'A2': 'A2.mp3', 'D3': 'D3.mp3', 'G3': 'G3.mp3',
+  'B3': 'B3.mp3', 'E4': 'E4.mp3',
+  'A4': 'A4.mp3', 'D5': 'D5.mp3', 'G5': 'G5.mp3', 'B5': 'B5.mp3',
+};
+
 const HARP_SAMPLES: Record<string, string> = {
   'C3': 'C3.mp3', 'D3': 'D3.mp3', 'E3': 'E3.mp3', 'G3': 'G3.mp3', 'A3': 'A3.mp3',
   'C4': 'C4.mp3', 'D4': 'D4.mp3', 'E4': 'E4.mp3', 'F4': 'F4.mp3', 'G4': 'G4.mp3', 'A4': 'A4.mp3', 'B4': 'B4.mp3',
   'C5': 'C5.mp3', 'D5': 'D5.mp3', 'E5': 'E5.mp3', 'F5': 'F5.mp3', 'G5': 'G5.mp3',
 };
 
-export type InstrumentId = 'piano' | 'nylon' | 'harp';
+export type InstrumentId = 'piano' | 'nylon' | 'harp' | 'acoustic';
 
 // ────────────────────────────────────────────────────────────
 //  ENGINE
@@ -103,13 +112,27 @@ export async function initAudio(): Promise<AudioEngine> {
       if (existing) return existing;
       if (id === 'piano') return piano;
 
-      const urls = id === 'nylon' ? NYLON_SAMPLES : HARP_SAMPLES;
-      const folder = id === 'nylon' ? 'guitar-nylon' : 'harp';
+      const urls =
+        id === 'nylon'    ? NYLON_SAMPLES    :
+        id === 'acoustic' ? ACOUSTIC_SAMPLES :
+                            HARP_SAMPLES;
+      const folder =
+        id === 'nylon'    ? 'guitar-nylon'    :
+        id === 'acoustic' ? 'guitar-acoustic' :
+                            'harp';
+      const release =
+        id === 'harp'     ? 2.4 :
+        id === 'acoustic' ? 1.1 :
+                            0.9;
+      const vol =
+        id === 'harp'     ? -4 :
+        id === 'acoustic' ? -5 :
+                            -5;
       const sampler = new Tone.Sampler({
         urls,
         baseUrl: `${NBR_BASE}/${folder}/`,
-        release: id === 'harp' ? 2.4 : 0.9,
-        volume: id === 'harp' ? -4 : -5,
+        release,
+        volume: vol,
       }).connect(reverb);
       await sampler.loaded;          // resolves when all buffers are ready
       instruments[id] = sampler;

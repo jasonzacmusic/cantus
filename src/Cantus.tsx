@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Play, RotateCcw, Film, Volume2, Disc3, Pin, X, PlayCircle, Square, Music2, Plus, Sparkles, Wand2, Flower2, Waves, Share2, Sun, Moon, Heart, Copy } from 'lucide-react';
+import { Play, RotateCcw, Film, Volume2, Disc3, Pin, X, PlayCircle, Square, Music2, Plus, Sparkles, Wand2, Flower2, Waves, Share2, Sun, Moon, Heart, Copy, Piano as PianoIcon, Guitar as GuitarIcon } from 'lucide-react';
 
 import { NOTES_SHARP, NOTES_FLAT, SCALES, SCALE_IDS } from './theory/scales';
 import { VOICINGS, START_DEGREES } from './theory/voicings';
@@ -429,6 +429,148 @@ function ScaleRibbon({ rootIdx, scaleId, colors, fontMono, fontDisplay, useFlats
   );
 }
 
+// ════════════════════════════════════════════════════════════
+//  FRETBOARD RIBBON — the scale mapped onto a 6-string, 12-fret
+//  guitar in standard tuning (E-A-D-G-B-E, low→high). Displayed
+//  with high-E on top, matching the tab-reading convention most
+//  students learn first. Every dot is a pitch class present in
+//  the current scale; root gets the scale color, others fade into
+//  a neutral ink. Fret numbers 3 / 5 / 7 / 9 / 12 are annotated.
+// ════════════════════════════════════════════════════════════
+
+// Standard tuning, top (string 1 / high-E) to bottom (string 6 / low-E).
+// MIDI values: E4=64, B3=59, G3=55, D3=50, A2=45, E2=40.
+const GUITAR_STRINGS = [
+  { midi: 64, name: 'e' },  // high E — thinnest
+  { midi: 59, name: 'B' },
+  { midi: 55, name: 'G' },
+  { midi: 50, name: 'D' },
+  { midi: 45, name: 'A' },
+  { midi: 40, name: 'E' },  // low E — thickest
+];
+const FRETBOARD_FRETS = 12;
+
+function FretboardRibbon({ rootIdx, scaleId, colors, fontMono, fontDisplay, useFlats, darkMode }) {
+  const s = SCALES[scaleId];
+
+  // pitch-class → scale-degree label (e.g. pc 3 → "♭3" in C minor)
+  const pcToLabel = {};
+  s.steps.forEach((semi, i) => {
+    pcToLabel[mod12(rootIdx + semi)] = s.labels[i];
+  });
+  const rootPc = mod12(rootIdx);
+
+  const leftPad    = 32;   // open-string area + string letters
+  const rightPad   = 6;
+  const fretW      = 46;
+  const stringGap  = 22;
+  const topPad     = 14;
+  const bottomPad  = 26;   // room for fret-number labels below 12th fret
+
+  const totalW = leftPad + FRETBOARD_FRETS * fretW + rightPad;
+  const totalH = topPad + 5 * stringGap + bottomPad;
+
+  const wireX        = (n) => leftPad + n * fretW;             // vertical fret wire
+  const fretCenterX  = (n) => wireX(n - 1) + fretW / 2;         // played position in fret N
+  const openX        = leftPad - 16;                            // open-string dot sits before the nut
+  const stringY      = (i) => topPad + i * stringGap;
+  const boardTop     = topPad;
+  const boardBot     = topPad + 5 * stringGap;
+  const boardMidY    = topPad + 2.5 * stringGap;
+
+  // Palette matches ScaleRibbon's key treatment
+  const woodStroke     = darkMode ? 'rgba(241,237,224,0.22)' : 'rgba(31,30,46,0.35)';
+  const stringStroke   = darkMode ? 'rgba(241,237,224,0.55)' : 'rgba(31,30,46,0.7)';
+  const nutFill        = darkMode ? '#E6E0D0'                : '#1F1E2E';
+  const inlayFill      = darkMode ? 'rgba(241,237,224,0.12)' : 'rgba(31,30,46,0.08)';
+  const noteFill       = darkMode ? '#3A3550'                : '#1F1E2E';
+  const noteStroke     = darkMode ? '#5A5272'                : '#12121C';
+  const dotTextColor   = '#F6F1E7';
+
+  // Collect the dot list so we can stagger the animation across the board
+  const dots = [];
+  GUITAR_STRINGS.forEach((str, si) => {
+    for (let f = 0; f <= FRETBOARD_FRETS; f++) {
+      const pc    = mod12(str.midi + f);
+      const label = pcToLabel[pc];
+      if (label === undefined) continue;
+      const isRoot = pc === rootPc;
+      const cx = f === 0 ? openX : fretCenterX(f);
+      const cy = stringY(si);
+      dots.push({ cx, cy, label, isRoot, order: f * 6 + si });
+    }
+  });
+
+  const SINGLE_INLAYS = [3, 5, 7, 9];
+  const DOUBLE_INLAY  = 12;
+
+  return (
+    <svg viewBox={`0 0 ${totalW} ${totalH}`} xmlns="http://www.w3.org/2000/svg"
+      preserveAspectRatio="xMidYMid meet"
+      style={{ width: '100%', height: 'auto', display: 'block', margin: '0 auto' }}>
+
+      {/* Inlay dots in the wood (behind strings & fret wires) */}
+      {SINGLE_INLAYS.map(f => (
+        <circle key={`inl-${f}`} cx={fretCenterX(f)} cy={boardMidY} r={5} fill={inlayFill} />
+      ))}
+      <circle cx={fretCenterX(DOUBLE_INLAY)} cy={boardMidY - 14} r={5} fill={inlayFill} />
+      <circle cx={fretCenterX(DOUBLE_INLAY)} cy={boardMidY + 14} r={5} fill={inlayFill} />
+
+      {/* Fret wires (vertical) — wire 0 is the nut, drawn thicker */}
+      {Array.from({ length: FRETBOARD_FRETS + 1 }, (_, f) => (
+        <line key={`wire-${f}`}
+          x1={wireX(f)} y1={boardTop - 2} x2={wireX(f)} y2={boardBot + 2}
+          stroke={f === 0 ? nutFill : woodStroke}
+          strokeWidth={f === 0 ? 3 : 1.2}
+          strokeLinecap="round" />
+      ))}
+
+      {/* Strings (horizontal) — progressively thicker from high-E (top) to low-E (bottom) */}
+      {GUITAR_STRINGS.map((_, i) => (
+        <line key={`string-${i}`}
+          x1={leftPad - 18} y1={stringY(i)} x2={totalW - 2} y2={stringY(i)}
+          stroke={stringStroke} strokeWidth={0.6 + i * 0.22} />
+      ))}
+
+      {/* String letter labels on the left (lowercase e for thin high-E, matches common notation) */}
+      {GUITAR_STRINGS.map((str, i) => (
+        <text key={`sl-${i}`} x={10} y={stringY(i)} dominantBaseline="middle" textAnchor="middle"
+          style={{ fontFamily: fontMono, fontSize: 11, fill: colors.muted, letterSpacing: '0.04em' }}>
+          {str.name}
+        </text>
+      ))}
+
+      {/* Fret number labels below the 3rd, 5th, 7th, 9th and 12th frets */}
+      {[...SINGLE_INLAYS, DOUBLE_INLAY].map(f => (
+        <text key={`fn-${f}`} x={fretCenterX(f)} y={totalH - 8} textAnchor="middle"
+          style={{ fontFamily: fontMono, fontSize: 10, fill: colors.muted, letterSpacing: '0.06em' }}>
+          {f}
+        </text>
+      ))}
+
+      {/* Scale-degree dots */}
+      {dots.map((d, i) => {
+        const r = d.isRoot ? 11 : 10;
+        return (
+          <g key={`dot-${i}`} style={{ animation: `scaleInDot 480ms ${d.order * 14}ms both ease-out` }}>
+            <circle cx={d.cx} cy={d.cy} r={r}
+              fill={d.isRoot ? s.color : noteFill}
+              stroke={d.isRoot ? s.color : noteStroke}
+              strokeWidth={d.isRoot ? 1.4 : 0.8} />
+            <text x={d.cx} y={d.cy} dominantBaseline="middle" textAnchor="middle"
+              style={{
+                fontFamily: fontDisplay, fontSize: d.isRoot ? 12 : 11,
+                fontWeight: 500, fill: dotTextColor, letterSpacing: '-0.02em',
+              }}>
+              {d.label}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 function HandUnderline({ color = '#524768', width = 1.8 }) {
   return (
     <svg viewBox="0 0 200 12" preserveAspectRatio="none" style={{ width: '100%', height: '12px', display: 'block' }}>
@@ -457,6 +599,14 @@ export default function Cantus() {
   const [recentPin, setRecentPin]     = useState(null); // flashes when user pins
   const [metronomeOn, setMetronomeOn] = useState(false);
   const [guideOpen, setGuideOpen]     = useState(false);
+  // Scale-map view — 'piano' (default) or 'guitar'. Persisted in localStorage.
+  const [mapView, setMapView]         = useState(() => {
+    try { return localStorage.getItem('cantus.mapView') === 'guitar' ? 'guitar' : 'piano'; }
+    catch { return 'piano'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('cantus.mapView', mapView); } catch {}
+  }, [mapView]);
 
   // ─── Transport (live-adjustable) ───
   const [bpm, setBpm]                 = useState(82);
@@ -552,7 +702,8 @@ export default function Cantus() {
   // Pattern → instrument mapping. Changing pattern triggers a lazy instrument load.
   const instrumentForPattern = (p) => {
     if (p === 'waltz') return 'harp';
-    if (p === 'bossa' || p === 'strum') return 'nylon';
+    if (p === 'bossa')  return 'nylon';     // classical nylon — bossa/jazz
+    if (p === 'strum')  return 'acoustic';  // steel-string — folk/pop/indie guitarist friendly
     return 'piano';
   };
 
@@ -2104,14 +2255,42 @@ export default function Cantus() {
           </div>
           <div style={{
             fontFamily: fontDisplay, fontSize: '22px', fontWeight: 500,
-            color: colors.ink, letterSpacing: '-0.015em', marginBottom: '14px',
+            color: colors.ink, letterSpacing: '-0.015em', marginBottom: '10px',
             fontStyle: isMajorFamily(scaleId) ? 'normal' : 'italic',
           }}>
             key of <span style={{ color: scale.color }}>{asciiName(rootMidi, useFlats)} {scale.name}</span>
           </div>
-          <ScaleRibbon rootIdx={rootMidi} scaleId={scaleId} colors={colors} fontMono={fontMono} fontDisplay={fontDisplay} useFlats={useFlats} darkMode={darkMode}/>
+
+          {/* View toggle — piano (default) ↔ guitar fretboard. Kept tiny on purpose. */}
+          <div role="tablist" aria-label="Scale view"
+            style={{
+              display: 'inline-flex', gap: 2, marginBottom: 14,
+              padding: 2, background: colors.paperD,
+              border: `1px solid ${colors.line}`, borderRadius: 999,
+            }}>
+            <button role="tab" aria-selected={mapView === 'piano'}
+              onClick={() => setMapView('piano')}
+              title="Piano view"
+              style={mapViewTabStyle(mapView === 'piano', colors, fontMono)}>
+              <PianoIcon size={13}/>
+            </button>
+            <button role="tab" aria-selected={mapView === 'guitar'}
+              onClick={() => setMapView('guitar')}
+              title="Guitar fretboard view"
+              style={mapViewTabStyle(mapView === 'guitar', colors, fontMono)}>
+              <GuitarIcon size={13}/>
+            </button>
+          </div>
+
+          {mapView === 'piano' ? (
+            <ScaleRibbon rootIdx={rootMidi} scaleId={scaleId} colors={colors} fontMono={fontMono} fontDisplay={fontDisplay} useFlats={useFlats} darkMode={darkMode}/>
+          ) : (
+            <FretboardRibbon rootIdx={rootMidi} scaleId={scaleId} colors={colors} fontMono={fontMono} fontDisplay={fontDisplay} useFlats={useFlats} darkMode={darkMode}/>
+          )}
           <div style={{ marginTop: '14px', fontFamily: fontUI, fontSize: '13px', color: colors.muted, fontStyle: 'italic' }}>
-            {scale.feel} · {scale.steps.length} notes · root on the left
+            {mapView === 'piano'
+              ? <>{scale.feel} · {scale.steps.length} notes · root on the left</>
+              : <>{scale.feel} · standard tuning · root in color · high E on top</>}
           </div>
         </section>
 
@@ -2274,6 +2453,19 @@ function headerUtilBtn(colors, fontMono) {
     padding: '8px 13px', borderRadius: '999px',
     fontFamily: fontMono, fontSize: '11px', letterSpacing: '0.12em',
     color: colors.ink2, cursor: 'pointer', transition: 'all 180ms ease',
+  };
+}
+
+function mapViewTabStyle(active, colors, fontMono) {
+  return {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    width: 30, height: 24, padding: 0,
+    background: active ? colors.paper : 'transparent',
+    border: 'none', borderRadius: 999,
+    color: active ? colors.ink : colors.muted,
+    fontFamily: fontMono, cursor: 'pointer',
+    transition: 'background 160ms ease, color 160ms ease',
+    boxShadow: active ? `0 1px 2px rgba(0,0,0,0.10)` : 'none',
   };
 }
 
