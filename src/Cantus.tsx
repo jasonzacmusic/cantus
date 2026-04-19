@@ -1354,11 +1354,11 @@ export default function Cantus() {
     if (patternId === 'drone') {
       // Sustained foundation + melodic top-note arpeggio
       ev.push({ note: low, time: 0, dur: bar * 0.97, vel: 0.48, layer: 'low' });
-      ev.push({ note: names, time: 0.05, dur: bar * 0.95, vel: 0.45 });
-      // Gentle top-note pulses on each beat
+      ev.push({ note: names, time: 0.01, dur: bar * 0.95, vel: 0.45 });
+      // Gentle top-note pulses locked to each beat (was +0.08s late).
       const top = names[names.length - 1];
       for (let b = 0; b < BEATS; b++) {
-        ev.push({ note: top, time: b * BEAT + 0.08, dur: BEAT * 0.6, vel: 0.5 });
+        ev.push({ note: top, time: b * BEAT, dur: BEAT * 0.6, vel: 0.5 });
       }
       return ev;
     }
@@ -1381,15 +1381,18 @@ export default function Cantus() {
     }
 
     // DEFAULT — arpeggio + resolving block (the original feel)
-    const ARP_GAP = BEAT * 0.58;
+    // Lock arpeggio to 8th-note grid so it lines up with the metronome.
+    const ARP_GAP = BEAT * 0.5;
     names.forEach((n, j) => {
       const vel = 0.68 + (j / Math.max(1, names.length - 1)) * 0.25;
       ev.push({ note: n, time: j * ARP_GAP, dur: ARP_GAP * 1.15, vel });
     });
-    ev.push({ note: low, time: 0.05, dur: bar * 0.92, vel: 0.5, layer: 'low' });
-    const blockAt = names.length * ARP_GAP + 0.04;
+    ev.push({ note: low, time: 0, dur: bar * 0.92, vel: 0.5, layer: 'low' });
+    // Block chord lands on the next whole beat after the arpeggio — still on the grid.
+    const blockAt = Math.ceil((names.length * ARP_GAP) / BEAT) * BEAT;
+    const blockDur = Math.max(0.1, bar - blockAt) * 0.85;
     names.forEach((n, j) => {
-      ev.push({ note: n, time: blockAt + j * 0.02, dur: bar * 0.78 * 0.45, vel: 0.82 });
+      ev.push({ note: n, time: blockAt + j * 0.012, dur: blockDur, vel: 0.82 });
     });
     return ev;
   };
@@ -1477,7 +1480,14 @@ export default function Cantus() {
       arpTimersRef.current.push(tClear);
     };
 
-    // The step function — runs once per chord and reschedules itself
+    // Accumulator-based scheduling — each bar's start is computed by adding
+    // exact bar duration to the previous bar's start, NOT by resampling
+    // Tone.now() each step. That keeps bar boundaries perfectly locked to
+    // the audio grid even if setTimeout fires late. Live bpm/timeSig changes
+    // still take effect at the next bar boundary.
+    const LOOKAHEAD = 0.12;
+    let nextChordTime = Tone.now() + LOOKAHEAD;
+
     const step = () => {
       if (progressionCancelRef.current) return;
 
@@ -1491,17 +1501,24 @@ export default function Cantus() {
 
       const idx = progressionLoopIdxRef.current % pinsSnap.length;
 
-      const LOOKAHEAD = 0.12;
-      const chordStart = Tone.now() + LOOKAHEAD;
-      scheduleChord(chordStart, idx, pinsSnap);
+      // If we've fallen badly behind (tab backgrounded, long GC), resync
+      // instead of scheduling in the past.
+      const now = Tone.now();
+      if (nextChordTime < now + 0.02) {
+        nextChordTime = now + LOOKAHEAD;
+      }
 
+      scheduleChord(nextChordTime, idx, pinsSnap);
       progressionLoopIdxRef.current = idx + 1;
 
-      // Next step uses the LIVE tempo — bpm/timeSig changes land at next bar
+      // Advance the audio clock by an EXACT bar duration (live bpm/timeSig).
       const curBpm = bpmRef.current;
       const curBeats = timeSigRef.current === '3/4' ? 3 : 4;
-      const nextMs = (60 / curBpm) * curBeats * 1000;
-      progressionStepRef.current = setTimeout(step, nextMs);
+      nextChordTime += (60 / curBpm) * curBeats;
+
+      // Wake ourselves up just before the next bar needs to be scheduled.
+      const msUntilNext = Math.max(0, (nextChordTime - Tone.now() - LOOKAHEAD) * 1000);
+      progressionStepRef.current = setTimeout(step, msUntilNext);
     };
 
     step();
