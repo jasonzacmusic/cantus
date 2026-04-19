@@ -614,6 +614,20 @@ export default function Cantus() {
   const [timeSig, setTimeSig]         = useState('4/4');       // '4/4' | '3/4'
   const [metroVol, setMetroVol]       = useState(0.6);
   const [masterVol, setMasterVol]     = useState(0.9);
+  // Count-in before playback starts: 0 (off), 1 bar (default), or 2 bars.
+  // Persisted so students get the same setting next time.
+  const [countInBars, setCountInBars] = useState(() => {
+    try {
+      const raw = localStorage.getItem('cantus.countIn');
+      const n = raw === null ? 1 : parseInt(raw, 10);
+      return n === 0 || n === 2 ? n : 1;
+    } catch { return 1; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('cantus.countIn', String(countInBars)); } catch {}
+  }, [countInBars]);
+  // Visible "1, 2, 3, 4" during the count-in (null when not counting).
+  const [countInBeat, setCountInBeat] = useState(null);
 
   // ─── UX state (dark mode, share toast, tap tempo) ───
   const [darkMode, setDarkMode] = useState(() => {
@@ -660,10 +674,12 @@ export default function Cantus() {
   const patternRef    = useRef('arpeggio');
   const timeSigRef    = useRef('4/4');
   const metroOnRef    = useRef(false);
+  const countInRef    = useRef(1);
   useEffect(() => { bpmRef.current = bpm; }, [bpm]);
   useEffect(() => { patternRef.current = pattern; }, [pattern]);
   useEffect(() => { timeSigRef.current = timeSig; }, [timeSig]);
   useEffect(() => { metroOnRef.current = metronomeOn; }, [metronomeOn]);
+  useEffect(() => { countInRef.current = countInBars; }, [countInBars]);
 
   const initAudio = useCallback(async () => {
     if (audioReadyRef.current) return;
@@ -1007,6 +1023,7 @@ export default function Cantus() {
     try { synthRef.current?.releaseAll(); } catch {}
     try { padRef.current?.releaseAll(); } catch {}
     setPlayingPinIdx(null);
+    setCountInBeat(null);
     clearArpTimers();
   };
 
@@ -1488,6 +1505,51 @@ export default function Cantus() {
     const LOOKAHEAD = 0.12;
     let nextChordTime = Tone.now() + LOOKAHEAD;
 
+    // ── COUNT-IN (DAW-style) ──
+    // Clicks are scheduled at exact Tone.now() audio times, sharing the same
+    // grid the first bar will lock onto — so the "1" of bar-1 lands exactly
+    // one beat after the final count-in click. Visual numbers are driven by
+    // setTimeout off the same audio times so eye and ear match.
+    const initBpm   = bpmRef.current;
+    const initBeats = timeSigRef.current === '3/4' ? 3 : 4;
+    const initBeat  = 60 / initBpm;
+    const countBars = countInRef.current;
+    if (countBars > 0) {
+      const countStart = nextChordTime;
+      const totalTicks = countBars * initBeats;
+      for (let i = 0; i < totalTicks; i++) {
+        const tickTime = countStart + i * initBeat;
+        const beatInBar = i % initBeats;
+        const isDownbeat = beatInBar === 0;
+        // Always audible even if the in-progression metronome is off —
+        // count-in is the point of the feature.
+        if (clickSynthRef.current) {
+          try {
+            clickSynthRef.current.triggerAttackRelease(
+              isDownbeat ? 'C6' : 'G5',
+              0.035, tickTime,
+              isDownbeat ? 0.9 : 0.55
+            );
+          } catch {}
+        }
+        // Visual count number
+        const beatNum = beatInBar + 1;
+        const showAtMs = Math.max(0, (tickTime - Tone.now()) * 1000);
+        const tv = setTimeout(() => {
+          if (progressionCancelRef.current) return;
+          setCountInBeat(beatNum);
+        }, showAtMs);
+        arpTimersRef.current.push(tv);
+      }
+      // Hide the count number as the first chord lands
+      const firstChordTime = countStart + totalTicks * initBeat;
+      const hideMs = Math.max(0, (firstChordTime - Tone.now()) * 1000);
+      const tc = setTimeout(() => setCountInBeat(null), hideMs);
+      arpTimersRef.current.push(tc);
+      // Push the first chord downbeat forward by the count-in length
+      nextChordTime = firstChordTime;
+    }
+
     const step = () => {
       if (progressionCancelRef.current) return;
 
@@ -1934,6 +1996,24 @@ export default function Cantus() {
               {pinsData.length >= 2 && (
                 <>
                   <button
+                    onClick={() => setCountInBars(v => (v + 1) % 3)}
+                    title={
+                      countInBars === 0 ? 'count-in off · playback starts immediately' :
+                      countInBars === 1 ? 'count-in: 1 bar before playback (click to change)' :
+                                          'count-in: 2 bars before playback (click to change)'
+                    }
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '7px 12px', borderRadius: '999px',
+                      background: countInBars > 0 ? colors.ink : 'transparent',
+                      color: countInBars > 0 ? colors.paper : colors.ink2,
+                      border: `1px solid ${countInBars > 0 ? colors.ink : colors.line}`,
+                      fontFamily: fontMono, fontSize: '10px', letterSpacing: '0.12em', textTransform: 'uppercase',
+                      cursor: 'pointer', transition: 'all 180ms ease',
+                    }}>
+                    count-in · {countInBars === 0 ? 'off' : `${countInBars} bar${countInBars > 1 ? 's' : ''}`}
+                  </button>
+                  <button
                     onClick={() => setMetronomeOn(v => !v)}
                     title={metronomeOn ? 'metronome on · 4 clicks per chord' : 'metronome off'}
                     style={{
@@ -1952,7 +2032,24 @@ export default function Cantus() {
                     }}/>
                     metronome
                   </button>
-                  {playingPinIdx !== null ? (
+                  {countInBeat !== null && (
+                    <div
+                      key={`cnt-${countInBeat}`}
+                      title="counting in"
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        minWidth: 44, height: 32, padding: '0 12px',
+                        borderRadius: '999px',
+                        background: colors.gold, color: colors.paper,
+                        fontFamily: fontDisplay, fontSize: '18px', fontWeight: 600,
+                        fontVariantNumeric: 'tabular-nums',
+                        boxShadow: `0 0 0 3px ${colors.gold}33`,
+                        animation: 'countInPulse 0.22s ease-out',
+                      }}>
+                      {countInBeat}
+                    </div>
+                  )}
+                  {playingPinIdx !== null || countInBeat !== null ? (
                     <button onClick={stopProgression} style={{
                       display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px',
                       background: colors.spice, color: colors.paper, border: 'none', borderRadius: '4px',
@@ -2399,6 +2496,11 @@ export default function Cantus() {
         @keyframes metroPulse {
           0%, 100% { transform: scale(1); opacity: 1; }
           50%      { transform: scale(1.5); opacity: 0.75; }
+        }
+        @keyframes countInPulse {
+          0%   { transform: scale(1.35); opacity: 0.4; }
+          60%  { transform: scale(1.08); opacity: 1;   }
+          100% { transform: scale(1);    opacity: 1;   }
         }
         @keyframes toastIn {
           0%   { opacity: 0; transform: translate(-50%, 8px); }
