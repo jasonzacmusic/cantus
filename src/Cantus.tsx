@@ -7,7 +7,7 @@ import { VOICINGS, START_DEGREES } from './theory/voicings';
 import { MOVES, INTERVAL_NAMES, INTERVAL_COLORS } from './theory/moves';
 import {
   CLASSIC_PATTERNS, CINEMATIC_PATTERNS, CLASSIC_KEYS,
-  CINEMATIC_ROOTS, CINEMATIC_VOICING_PLANS,
+  CINEMATIC_ROOTS,
 } from './theory/progressions';
 import {
   mod12, pitchName, asciiName, preferFlats, isMajorFamily,
@@ -1200,7 +1200,10 @@ export default function Cantus() {
   const classicIdxRef = useRef(-1);
   const cinematicIdxRef = useRef(-1);
 
-  // CLASSIC: traditional diatonic progressions in 3rds (triads)
+  // CLASSIC: traditional diatonic progressions. Chord qualities are fixed
+  // by the roman-numeral pattern (M/m), but the *voicing* and *start degree*
+  // follow whatever the user has currently selected — so "seconds from the
+  // 3rd" isn't secretly reset to triads when they hit Classic.
   const surpriseClassic = () => {
     stopCinema(); stopProgression(); clearArpTimers();
     // Advance to a different pattern than last time
@@ -1214,17 +1217,17 @@ export default function Cantus() {
     const tonic = CLASSIC_KEYS[Math.floor(Math.random() * CLASSIC_KEYS.length)];
 
     setPinboard(pattern.steps.map(([offset, quality]) =>
-      makePin(tonic + offset, quality === 'M' ? 'major' : 'minor', 'thirds', 'root')
+      makePin(tonic + offset, quality === 'M' ? 'major' : 'minor', voicingId, startDegId)
     ));
     const [firstOffset, firstQuality] = pattern.steps[0];
     setRootMidi(tonic + firstOffset);
     setScaleId(firstQuality === 'M' ? 'major' : 'minor');
-    setVoicingId('thirds'); setStartDegId('root');
     setLastMove(`classic · ${pattern.label}`);
   };
 
-  // CINEMATIC: non-diatonic / chromatic-mediant film-score progressions
-  // in quartal 4ths voicings for that open, suspended, Zimmer sound.
+  // CINEMATIC: non-diatonic / chromatic-mediant film-score progressions.
+  // Same principle as Classic — the progression shape is fixed, but each
+  // chord is voiced with the user's current voicing + start degree.
   const surpriseCinematic = () => {
     stopCinema(); stopProgression(); clearArpTimers();
     let idx = cinematicIdxRef.current;
@@ -1235,17 +1238,13 @@ export default function Cantus() {
     cinematicIdxRef.current = next;
     const pattern = CINEMATIC_PATTERNS[next];
     const tonic = CINEMATIC_ROOTS[Math.floor(Math.random() * CINEMATIC_ROOTS.length)];
-    const vPlan = CINEMATIC_VOICING_PLANS[Math.floor(Math.random() * CINEMATIC_VOICING_PLANS.length)];
 
-    setPinboard(pattern.steps.map(([offset, quality], i) => {
-      const [v, sd] = vPlan[i];
-      return makePin(tonic + offset, quality === 'M' ? 'major' : 'minor', v, sd);
-    }));
+    setPinboard(pattern.steps.map(([offset, quality]) =>
+      makePin(tonic + offset, quality === 'M' ? 'major' : 'minor', voicingId, startDegId)
+    ));
     const [firstOffset, firstQuality] = pattern.steps[0];
-    const [firstV, firstSD] = vPlan[0];
     setRootMidi(tonic + firstOffset);
     setScaleId(firstQuality === 'M' ? 'major' : 'minor');
-    setVoicingId(firstV); setStartDegId(firstSD);
     setLastMove(`cinematic · ${pattern.label}`);
   };
 
