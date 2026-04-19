@@ -2032,23 +2032,6 @@ export default function Cantus() {
                     }}/>
                     metronome
                   </button>
-                  {countInBeat !== null && (
-                    <div
-                      key={`cnt-${countInBeat}`}
-                      title="counting in"
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        minWidth: 44, height: 32, padding: '0 12px',
-                        borderRadius: '999px',
-                        background: colors.gold, color: colors.paper,
-                        fontFamily: fontDisplay, fontSize: '18px', fontWeight: 600,
-                        fontVariantNumeric: 'tabular-nums',
-                        boxShadow: `0 0 0 3px ${colors.gold}33`,
-                        animation: 'countInPulse 0.22s ease-out',
-                      }}>
-                      {countInBeat}
-                    </div>
-                  )}
                   {playingPinIdx !== null || countInBeat !== null ? (
                     <button onClick={stopProgression} style={{
                       display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px',
@@ -2460,6 +2443,51 @@ export default function Cantus() {
         </div>
       )}
 
+      {/* COUNT-OFF OVERLAY — big impossible-to-miss number during count-in */}
+      {countInBeat !== null && (
+        <div
+          aria-live="polite"
+          style={{
+            position: 'fixed', inset: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            pointerEvents: 'none',
+            zIndex: 60,
+          }}
+        >
+          {/* soft backdrop so the number reads on any content */}
+          <div style={{
+            position: 'absolute', inset: 0,
+            background: darkMode
+              ? 'radial-gradient(circle at center, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.25) 55%, transparent 80%)'
+              : 'radial-gradient(circle at center, rgba(255,255,255,0.65) 0%, rgba(255,255,255,0.3) 55%, transparent 80%)',
+          }}/>
+          <div
+            key={`cnt-${countInBeat}`}
+            style={{
+              position: 'relative',
+              width: 220, height: 220,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              borderRadius: '50%',
+              background: colors.gold, color: colors.paper,
+              fontFamily: fontDisplay, fontSize: 140, fontWeight: 600,
+              lineHeight: 1, fontVariantNumeric: 'tabular-nums',
+              boxShadow: `0 16px 48px rgba(0,0,0,${darkMode ? 0.55 : 0.25}), 0 0 0 8px ${colors.gold}33`,
+              animation: 'countOffPop 0.3s ease-out',
+            }}>
+            {countInBeat}
+          </div>
+          <div style={{
+            position: 'absolute', bottom: '30%', left: '50%', transform: 'translateX(-50%)',
+            fontFamily: 'var(--cantus-mono, ui-monospace, monospace)',
+            fontSize: 11, letterSpacing: '0.25em', textTransform: 'uppercase',
+            color: darkMode ? '#FBF6EA' : '#2E2A24',
+            opacity: 0.8,
+          }}>
+            count-off
+          </div>
+        </div>
+      )}
+
       {guideOpen && (
         <LearnGuide
           onClose={() => setGuideOpen(false)}
@@ -2497,10 +2525,10 @@ export default function Cantus() {
           0%, 100% { transform: scale(1); opacity: 1; }
           50%      { transform: scale(1.5); opacity: 0.75; }
         }
-        @keyframes countInPulse {
-          0%   { transform: scale(1.35); opacity: 0.4; }
-          60%  { transform: scale(1.08); opacity: 1;   }
-          100% { transform: scale(1);    opacity: 1;   }
+        @keyframes countOffPop {
+          0%   { transform: scale(0.6); opacity: 0;   }
+          45%  { transform: scale(1.12); opacity: 1;  }
+          100% { transform: scale(1);   opacity: 1;   }
         }
         @keyframes toastIn {
           0%   { opacity: 0; transform: translate(-50%, 8px); }
