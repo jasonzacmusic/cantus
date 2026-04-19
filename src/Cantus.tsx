@@ -751,6 +751,21 @@ export default function Cantus() {
     }
   }, []);
 
+  // Keep every pinned chord re-voiced with the user's current voicing +
+  // start degree. Changing "seconds · from the 3rd" should immediately
+  // re-voice the whole pinboard, not just newly-pinned chords. Pin identity
+  // (root + scale) is preserved; only the voicing choice travels with state.
+  useEffect(() => {
+    setPinboard(prev => {
+      if (prev.length === 0) return prev;
+      const allMatch = prev.every(p =>
+        p.voicingId === voicingId && p.startDegId === startDegId
+      );
+      if (allMatch) return prev;
+      return prev.map(p => ({ ...p, voicingId, startDegId }));
+    });
+  }, [voicingId, startDegId]);
+
   // Debounced writer — only after hydration completes, and only when there
   // is something to share (≥1 pin) or non-default transport state.
   useEffect(() => {
