@@ -2061,7 +2061,7 @@ export default function Cantus() {
                       isLast={slot === pinsData.length - 1}
                       onLoad={() => loadPin(pin)} onRemove={() => unpinById(pin.id)}
                       onMoveLeft={() => movePin(slot, -1)} onMoveRight={() => movePin(slot, 1)}
-                      colors={colors} fontDisplay={fontDisplay} fontMono={fontMono}/>
+                      colors={colors} fontDisplay={fontDisplay} fontMono={fontMono} darkMode={darkMode}/>
                   ) : (
                     slot === pinsData.length ? (
                       <EmptyPinSlot colors={colors} fontMono={fontMono} slot={slot}/>
@@ -2715,14 +2715,21 @@ function EmptyPinSlot({ colors, fontMono, slot }) {
   );
 }
 
-function PinnedCard({ pin, idx, isPlaying, isFresh, isFirst, isLast, onLoad, onRemove, onMoveLeft, onMoveRight, colors, fontDisplay, fontMono }) {
+function PinnedCard({ pin, idx, isPlaying, isFresh, isFirst, isLast, onLoad, onRemove, onMoveLeft, onMoveRight, colors, fontDisplay, fontMono, darkMode }) {
   const [hover, setHover] = useState(false);
+  // Theme-aware surfaces. In light mode cards sit on a warm cream; in dark
+  // mode they sit one tone above the page so the chord name reads clearly
+  // against the slightly-lifted surface instead of vanishing into the bg.
+  const restBg  = darkMode ? colors.paperD : '#FBF6EA';
+  const hoverBg = darkMode ? '#2A2840'     : colors.paper;
+  const subtleFill   = darkMode ? 'rgba(241,237,224,0.08)' : 'rgba(31,30,46,0.06)';
+  const subtleBorder = darkMode ? 'rgba(241,237,224,0.20)' : 'rgba(31,30,46,0.15)';
   return (
     <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onClick={onLoad}
       style={{
         position: 'relative', flex: '1 1 180px', minWidth: 150,
         padding: '14px 14px 10px',
-        background: isPlaying ? colors.goldBg : (hover ? colors.paper : '#FBF6EA'),
+        background: isPlaying ? colors.goldBg : (hover ? hoverBg : restBg),
         border: `${isPlaying ? '2px' : '1px'} solid ${isPlaying ? colors.gold : (hover ? pin.scaleColor : colors.line)}`,
         borderRadius: '6px',
         transition: 'all 200ms ease', cursor: 'pointer',
@@ -2750,7 +2757,7 @@ function PinnedCard({ pin, idx, isPlaying, isFresh, isFirst, isLast, onLoad, onR
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
         <span style={{
           fontFamily: fontMono, fontSize: '9px', color: colors.muted, letterSpacing: '0.1em',
-          padding: '1px 6px', borderRadius: 3, background: 'rgba(0,0,0,0.04)',
+          padding: '1px 6px', borderRadius: 3, background: subtleFill,
         }}>
           #{idx + 1}
         </span>
@@ -2791,8 +2798,8 @@ function PinnedCard({ pin, idx, isPlaying, isFresh, isFirst, isLast, onLoad, onR
             title="move left"
             style={{
               width: 22, height: 22, borderRadius: 4, padding: 0,
-              background: isFirst ? 'transparent' : 'rgba(31,30,46,0.06)',
-              border: `1px solid ${isFirst ? colors.line : 'rgba(31,30,46,0.15)'}`,
+              background: isFirst ? 'transparent' : subtleFill,
+              border: `1px solid ${isFirst ? colors.line : subtleBorder}`,
               cursor: isFirst ? 'not-allowed' : 'pointer',
               opacity: isFirst ? 0.3 : 1,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -2803,8 +2810,8 @@ function PinnedCard({ pin, idx, isPlaying, isFresh, isFirst, isLast, onLoad, onR
             title="move right"
             style={{
               width: 22, height: 22, borderRadius: 4, padding: 0,
-              background: isLast ? 'transparent' : 'rgba(31,30,46,0.06)',
-              border: `1px solid ${isLast ? colors.line : 'rgba(31,30,46,0.15)'}`,
+              background: isLast ? 'transparent' : subtleFill,
+              border: `1px solid ${isLast ? colors.line : subtleBorder}`,
               cursor: isLast ? 'not-allowed' : 'pointer',
               opacity: isLast ? 0.3 : 1,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
