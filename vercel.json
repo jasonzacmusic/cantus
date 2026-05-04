@@ -1,0 +1,20 @@
+{
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options",         "value": "SAMEORIGIN" },
+        { "key": "Referrer-Policy",         "value": "strict-origin-when-cross-origin" },
+        {
+          "key": "Set-Cookie",
+          "value": "_vercel_jwt=; Max-Age=0; Path=/; Secure; SameSite=None"
+        },
+        {
+          "key": "Set-Cookie",
+          "value": "_vercel_protection_bypass=; Max-Age=0; Path=/; Secure; SameSite=None"
+        }
+      ]
+    }
+  ]
+}
