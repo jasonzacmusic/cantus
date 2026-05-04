@@ -30,10 +30,23 @@ const NYLON_SAMPLES: Record<string, string> = {
 // Steel-string acoustic guitar — nbrosowsky "guitar-acoustic" folder.
 // Warmer + more familiar to pop/folk/indie guitar students than the
 // classical nylon set.
+//
+// FULL CHROMATIC E2..D5 — every semitone of the playable range is a real
+// sample. Previous (10-sample) version forced Tone.Sampler to pitch-shift
+// up to ±5 semitones per note, which made wide voicings sound thin and
+// inconsistent. With 35 samples each note plays from a near-tuned source.
+// We also dropped the bogus G5/B5 entries that were 404'ing on the CDN —
+// the bank tops out at D5.
 const ACOUSTIC_SAMPLES: Record<string, string> = {
-  'E2': 'E2.mp3', 'A2': 'A2.mp3', 'D3': 'D3.mp3', 'G3': 'G3.mp3',
-  'B3': 'B3.mp3', 'E4': 'E4.mp3',
-  'A4': 'A4.mp3', 'D5': 'D5.mp3', 'G5': 'G5.mp3', 'B5': 'B5.mp3',
+  'E2':  'E2.mp3',  'F2':  'F2.mp3',  'F#2': 'Fs2.mp3', 'G2':  'G2.mp3',  'G#2': 'Gs2.mp3',
+  'A2':  'A2.mp3',  'A#2': 'As2.mp3', 'B2':  'B2.mp3',
+  'C3':  'C3.mp3',  'C#3': 'Cs3.mp3', 'D3':  'D3.mp3',  'D#3': 'Ds3.mp3',
+  'E3':  'E3.mp3',  'F3':  'F3.mp3',  'F#3': 'Fs3.mp3', 'G3':  'G3.mp3',  'G#3': 'Gs3.mp3',
+  'A3':  'A3.mp3',  'A#3': 'As3.mp3', 'B3':  'B3.mp3',
+  'C4':  'C4.mp3',  'C#4': 'Cs4.mp3', 'D4':  'D4.mp3',  'D#4': 'Ds4.mp3',
+  'E4':  'E4.mp3',  'F4':  'F4.mp3',  'F#4': 'Fs4.mp3', 'G4':  'G4.mp3',  'G#4': 'Gs4.mp3',
+  'A4':  'A4.mp3',  'A#4': 'As4.mp3', 'B4':  'B4.mp3',
+  'C5':  'C5.mp3',  'C#5': 'Cs5.mp3', 'D5':  'D5.mp3',
 };
 
 const HARP_SAMPLES: Record<string, string> = {
@@ -122,7 +135,7 @@ export async function initAudio(): Promise<AudioEngine> {
                             'harp';
       const release =
         id === 'harp'     ? 2.4 :
-        id === 'acoustic' ? 1.1 :
+        id === 'acoustic' ? 2.8 :   // long natural decay — strummed steel string
                             0.9;
       const vol =
         id === 'harp'     ? -4 :

@@ -1391,19 +1391,30 @@ export default function Cantus() {
     }
 
     if (patternId === 'strum') {
-      // Rolled strum on each beat (guitar-flavored) — up-stroke low→high,
-      // light off-beat strum on '&' of 2 for movement
-      const rollGap = 0.028;
+      // Rolled strum, guitar-flavored. Up-stroke (low→high) on 1,3 ;
+      // down-stroke (high→low) on 2,4 — the standard "DUDU" feel.
+      // Each note RINGS THROUGH the rest of the bar instead of being cut at
+      // the next beat — that's how a real acoustic guitar sustains. The
+      // sampler's release tail does the rest of the work.
+      const rollGap = 0.030;
       for (let b = 0; b < BEATS; b++) {
-        const up = b % 2 === 0;                      // down-strum on 1,3
+        const up = b % 2 === 0;                              // up on 1,3
         const base = b * BEAT;
         const seq = up ? names : [...names].reverse();
+        // Hold time = remainder of the bar from this strum's start.
+        // Last strum still gets ~half a beat of decay before the next bar.
+        const hold = Math.max(BEAT * 1.6, bar - base - 0.05);
         seq.forEach((n, j) => {
-          ev.push({ note: n, time: base + j * rollGap, dur: BEAT * 0.85, vel: up ? 0.78 : 0.62 });
+          ev.push({
+            note: n,
+            time: base + j * rollGap,
+            dur: hold,
+            vel: up ? 0.82 : 0.66,
+          });
         });
       }
-      // Low foundation
-      ev.push({ note: low[0], time: 0, dur: bar * 0.92, vel: 0.6, layer: 'low' });
+      // Low foundation — bass note rings through the entire bar
+      ev.push({ note: low[0], time: 0, dur: bar * 0.97, vel: 0.55, layer: 'low' });
       return ev;
     }
 
