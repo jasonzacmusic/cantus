@@ -1019,9 +1019,19 @@ export default function Cantus() {
       clearTimeout(progressionStepRef.current);
       progressionStepRef.current = null;
     }
-    // Release any sustained notes immediately
+    // Release any sustained notes immediately, on EVERY loaded instrument
+    // (piano, nylon, acoustic, harp). Previously we only released piano +
+    // pad, so a strum/harp sustain kept ringing after Stop.
     try { synthRef.current?.releaseAll(); } catch {}
     try { padRef.current?.releaseAll(); } catch {}
+    try {
+      const loaded = engineRef.current?.instruments;
+      if (loaded) {
+        Object.values(loaded).forEach(inst => {
+          try { inst?.releaseAll(); } catch {}
+        });
+      }
+    } catch {}
     setPlayingPinIdx(null);
     setCountInBeat(null);
     clearArpTimers();
@@ -1419,6 +1429,28 @@ export default function Cantus() {
     stopCinema(); clearArpTimers();
     try { await initAudio(); } catch { return; }
     if (!audioReadyRef.current) return;
+
+    // CRITICAL: wait for the pattern's instrument samples to actually be
+    // loaded before scheduling. Without this, the first chord falls back to
+    // piano while the strum/nylon/harp sampler is still fetching, then later
+    // chords switch to the real voice mid-progression — which sounds like
+    // "first chord is piano, the rest are weirdly inconsistent".
+    const curPatternId = patternRef.current;
+    const instId = instrumentForPattern(curPatternId);
+    const alreadyLoaded = !!engineRef.current?.instruments?.[instId];
+    if (!alreadyLoaded && instId !== 'piano') {
+      // First time picking this pattern → samples are still streaming. Tell
+      // the user, then wait. Subsequent plays are instant.
+      showToast(`loading ${instId}…`);
+    }
+    try {
+      await engineRef.current?.loadInstrument(instId);
+    } catch (err) {
+      // Sample bank failed to load (offline, CDN issue) — fall through to
+      // the piano fallback inside scheduleChord rather than blocking play.
+      console.warn(`[cantus] sample load for "${instId}" failed, using piano:`, err);
+    }
+    if (progressionCancelRef.current) return;  // user hit stop while loading
 
     // Reset state
     progressionCancelRef.current = false;
